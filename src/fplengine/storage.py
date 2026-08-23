@@ -7,16 +7,16 @@ import math
 import os
 import re
 import sqlite3
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
-from typing import Any, Iterator, Sequence
+from typing import Any
 from urllib.parse import unquote
 
 from .api_client import Snapshot
 from .model import Prediction
-
 
 DEFAULT_SQLITE_PATH = Path(".data/fplengine.db")
 
@@ -231,7 +231,7 @@ class Store:
         if not predictions:
             raise ValueError("Cannot persist an empty prediction set")
         first = predictions[0]
-        generated_at = datetime.now(timezone.utc).isoformat()
+        generated_at = datetime.now(UTC).isoformat()
         assumptions = json.dumps(first.provenance, sort_keys=True)
         runs = self._table("prediction_run")
         with self.connect() as connection:
@@ -266,14 +266,7 @@ class Store:
                  expected_goals, expected_assists, clean_sheet_probability, risk,
                  lower_bound, upper_bound, components)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (prediction_run_id, player_id) DO UPDATE SET
-                expected_minutes=excluded.expected_minutes,
-                expected_points=excluded.expected_points,
-                expected_goals=excluded.expected_goals,
-                expected_assists=excluded.expected_assists,
-                clean_sheet_probability=excluded.clean_sheet_probability,
-                risk=excluded.risk, lower_bound=excluded.lower_bound,
-                upper_bound=excluded.upper_bound, components=excluded.components"""
+                ON CONFLICT (prediction_run_id, player_id) DO NOTHING"""
             )
             cursor.executemany(
                 sql,
@@ -297,18 +290,27 @@ class Store:
         return run_id
 
     def evaluate(
-        self, event_id: int, actual_points: dict[int, int], deadline_utc: str
+        self,
+        event_id: int,
+        actual_points: dict[int, int],
+        deadline_utc: str,
+        policy: str = "latest_predeadline",
     ) -> dict[str, float | int]:
+        if policy not in {"earliest_predeadline", "latest_predeadline"}:
+            raise ValueError("policy must be earliest_predeadline or latest_predeadline")
         runs = self._table("prediction_run")
         predictions = self._table("player_prediction")
-        now = datetime.now(timezone.utc).isoformat()
+        evaluations = self._table("player_prediction_evaluation")
+        summaries = self._table("prediction_evaluation")
+        now = datetime.now(UTC).isoformat()
+        order = "ASC" if policy == "earliest_predeadline" else "DESC"
         with self.connect() as connection:
             cursor = connection.cursor()
             cursor.execute(
                 self._sql(
                     f"""SELECT id FROM {runs}
                     WHERE target_event=? AND generated_at <= ?
-                    ORDER BY generated_at ASC LIMIT 1"""
+                    ORDER BY generated_at {order} LIMIT 1"""
                 ),
                 (event_id, deadline_utc),
             )
@@ -332,17 +334,34 @@ class Store:
                 errors.append(error)
                 cursor.execute(
                     self._sql(
-                        f"""UPDATE {predictions} SET actual_points=?, absolute_error=?,
-                        squared_error=?, evaluated_at=? WHERE prediction_run_id=? AND player_id=?"""
+                        f"""INSERT INTO {evaluations}
+                        (prediction_run_id, player_id, actual_points, absolute_error,
+                         squared_error, evaluated_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (prediction_run_id, player_id) DO NOTHING"""
                     ),
-                    (actual, abs(error), error * error, now, run_id, player_id),
+                    (run_id, player_id, actual, abs(error), error * error, now),
                 )
-        if not errors:
-            raise ValueError(f"No actual player scores matched the GW{event_id} prediction run")
+            if not errors:
+                raise ValueError(f"No actual player scores matched the GW{event_id} prediction run")
+            mae = sum(abs(value) for value in errors) / len(errors)
+            rmse = math.sqrt(sum(value * value for value in errors) / len(errors))
+            bias = sum(errors) / len(errors)
+            cursor.execute(
+                self._sql(
+                    f"""INSERT INTO {summaries}
+                    (prediction_run_id, evaluation_policy, event_id, deadline_time,
+                     evaluated_at, players_evaluated, mae, rmse, bias)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (prediction_run_id, evaluation_policy) DO NOTHING"""
+                ),
+                (run_id, policy, event_id, deadline_utc, now, len(errors), mae, rmse, bias),
+            )
         return {
             "prediction_run_id": run_id,
+            "evaluation_policy": policy,
             "players_evaluated": len(errors),
-            "mae": round(sum(abs(value) for value in errors) / len(errors), 4),
-            "rmse": round(math.sqrt(sum(value * value for value in errors) / len(errors)), 4),
-            "bias": round(sum(errors) / len(errors), 4),
+            "mae": round(mae, 4),
+            "rmse": round(rmse, 4),
+            "bias": round(bias, 4),
         }

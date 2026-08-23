@@ -2,6 +2,22 @@
 
 Research was refreshed on 2026-08-23 and favored primary/official sources.
 
+## v0.2 evidence decision
+
+The live 2026/27 bootstrap returned zero in every legacy attack/defence strength field.
+v0.1 clamped those values to its minimum goal-rate path, erasing most team and opponent
+differences. It also allowed ownership and price to stand in for role evidence and put
+too much weight on a single match of xG, saves and defensive actions.
+
+The accepted challenger uses stable-code prior-season role/rate aggregates, hierarchical
+shrinkage and the still-populated ordinal team strengths. Previous-season team-xG priors
+were tested but not promoted: they slightly improved starter MAE while reducing NDCG@10
+from 0.396 to 0.386. Complexity that loses on the intended ranking metric stays out.
+
+The public historical archive is research evidence, not proof that its archived FPL xP
+was captured predeadline. Raw archives remain ignored; the repository contains only a
+compact aggregate prior with source-file hashes.
+
 ## FPL 2026/27
 
 - The official scoring table awards 10/6/5/4 points per goal by GK/DEF/MID/FWD,

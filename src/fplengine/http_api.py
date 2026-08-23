@@ -34,7 +34,7 @@ class EngineCache:
 
 def make_handler(cache: EngineCache) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
-        server_version = "fplengine/0.1"
+        server_version = "fplengine/0.2"
 
         def _json(self, status: HTTPStatus, payload: Any) -> None:
             body = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -45,11 +45,11 @@ def make_handler(cache: EngineCache) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(body)
 
-        def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
+        def do_GET(self) -> None:
             try:
                 parsed = urlparse(self.path)
                 if parsed.path == "/health":
-                    self._json(HTTPStatus.OK, {"status": "ok", "version": "0.1.0"})
+                    self._json(HTTPStatus.OK, {"status": "ok", "version": "0.2.0"})
                     return
                 snapshot, predictions = cache.get()
                 query = parse_qs(parsed.query)
@@ -84,7 +84,7 @@ def make_handler(cache: EngineCache) -> type[BaseHTTPRequestHandler]:
                 )
             except (ValueError, RuntimeError) as exc:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-            except Exception as exc:  # boundary: convert unexpected failures to JSON
+            except Exception as exc:  # noqa: BLE001 - HTTP boundary returns safe JSON
                 self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": type(exc).__name__})
 
         def log_message(self, format: str, *args: Any) -> None:

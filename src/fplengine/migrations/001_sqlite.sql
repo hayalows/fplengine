@@ -101,6 +101,29 @@ CREATE TABLE IF NOT EXISTS player_prediction (
     PRIMARY KEY (prediction_run_id, player_id)
 );
 
+CREATE TABLE IF NOT EXISTS player_prediction_evaluation (
+    prediction_run_id INTEGER NOT NULL REFERENCES prediction_run(id),
+    player_id INTEGER NOT NULL REFERENCES player(fpl_id),
+    actual_points INTEGER NOT NULL,
+    absolute_error REAL NOT NULL,
+    squared_error REAL NOT NULL,
+    evaluated_at TEXT NOT NULL,
+    PRIMARY KEY (prediction_run_id, player_id)
+);
+
+CREATE TABLE IF NOT EXISTS prediction_evaluation (
+    prediction_run_id INTEGER NOT NULL REFERENCES prediction_run(id),
+    evaluation_policy TEXT NOT NULL,
+    event_id INTEGER NOT NULL,
+    deadline_time TEXT NOT NULL,
+    evaluated_at TEXT NOT NULL,
+    players_evaluated INTEGER NOT NULL,
+    mae REAL NOT NULL,
+    rmse REAL NOT NULL,
+    bias REAL NOT NULL,
+    PRIMARY KEY (prediction_run_id, evaluation_policy)
+);
+
 CREATE INDEX IF NOT EXISTS prediction_event_idx
 ON prediction_run(target_event, generated_at DESC);
 

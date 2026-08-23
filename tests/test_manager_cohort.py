@@ -25,6 +25,18 @@ class StubClient:
             ]
         }
 
+    def entry_history(self, entry_id: int) -> dict:
+        rank = 10_000 if entry_id == 101 else 20_000
+        return {
+            "past": [
+                {"season_name": "2024/25", "rank": rank + 5_000},
+                {"season_name": "2025/26", "rank": rank},
+            ]
+        }
+
+    def entry_transfers(self, entry_id: int) -> list[dict]:
+        return []
+
 
 class ManagerCohortTests(unittest.TestCase):
     def test_consensus_uses_successful_sample_as_denominator(self) -> None:
@@ -34,6 +46,7 @@ class ManagerCohortTests(unittest.TestCase):
             StubClient(), observed, predictions, sample_size=2, picks_event=2
         )
         self.assertEqual(report["metadata"]["successful_sample"], 2)
+        self.assertEqual(report["metadata"]["historically_qualified"], 2)
         self.assertEqual(report["selection_consensus"][0]["cohort_percent"], 100.0)
         self.assertEqual(len(report["captain_consensus"]), 2)
 

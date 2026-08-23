@@ -106,6 +106,31 @@ CREATE TABLE IF NOT EXISTS engine.player_prediction (
     PRIMARY KEY (prediction_run_id, player_id)
 );
 
+CREATE TABLE IF NOT EXISTS engine.player_prediction_evaluation (
+    prediction_run_id bigint NOT NULL REFERENCES engine.prediction_run(id),
+    player_id integer NOT NULL REFERENCES engine.player(fpl_id),
+    actual_points smallint NOT NULL,
+    absolute_error numeric(8,3) NOT NULL,
+    squared_error numeric(10,3) NOT NULL,
+    evaluated_at timestamptz NOT NULL,
+    PRIMARY KEY (prediction_run_id, player_id)
+);
+
+CREATE TABLE IF NOT EXISTS engine.prediction_evaluation (
+    prediction_run_id bigint NOT NULL REFERENCES engine.prediction_run(id),
+    evaluation_policy text NOT NULL CHECK (
+        evaluation_policy IN ('earliest_predeadline', 'latest_predeadline')
+    ),
+    event_id smallint NOT NULL,
+    deadline_time timestamptz NOT NULL,
+    evaluated_at timestamptz NOT NULL,
+    players_evaluated integer NOT NULL CHECK (players_evaluated > 0),
+    mae numeric(9,4) NOT NULL,
+    rmse numeric(9,4) NOT NULL,
+    bias numeric(9,4) NOT NULL,
+    PRIMARY KEY (prediction_run_id, evaluation_policy)
+);
+
 CREATE INDEX IF NOT EXISTS prediction_event_idx
 ON engine.prediction_run(target_event, generated_at DESC);
 
@@ -135,3 +160,4 @@ CREATE TABLE IF NOT EXISTS engine.manager_pick (
 COMMENT ON SCHEMA engine IS 'FPL Engine normalized observations and versioned predictions';
 COMMENT ON COLUMN engine.player_snapshot.captured_at IS 'As-of timestamp used to prevent future-data leakage';
 COMMENT ON COLUMN engine.player_prediction.components IS 'Calculated component breakdown, never raw observed data';
+COMMENT ON TABLE engine.player_prediction_evaluation IS 'Outcomes stored separately so forecasts remain immutable';

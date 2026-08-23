@@ -1,0 +1,262 @@
+{
+  "models": {
+    "archive_fpl_xp_timing_unverified": {
+      "all": {
+        "bias": -0.957344,
+        "gameweeks": 33,
+        "mae": 1.099876,
+        "ndcg_at_10": 0.164078,
+        "rmse": 2.452846,
+        "spearman": 0.143119,
+        "top_10_overlap": 0.057576
+      },
+      "starters": {
+        "bias": -3.096319,
+        "gameweeks": 33,
+        "mae": 3.392707,
+        "ndcg_at_10": 0.318006,
+        "rmse": 4.486374,
+        "spearman": 0.094984,
+        "top_10_overlap": 0.087879
+      }
+    },
+    "last_gameweek": {
+      "all": {
+        "bias": -0.028977,
+        "gameweeks": 33,
+        "mae": 1.134548,
+        "ndcg_at_10": 0.275952,
+        "rmse": 2.577706,
+        "spearman": 0.70317,
+        "top_10_overlap": 0.066667
+      },
+      "starters": {
+        "bias": -0.469615,
+        "gameweeks": 33,
+        "mae": 3.183032,
+        "ndcg_at_10": 0.292543,
+        "rmse": 4.483919,
+        "spearman": 0.05303,
+        "top_10_overlap": 0.069697
+      }
+    },
+    "position_mean": {
+      "all": {
+        "bias": 0.058118,
+        "gameweeks": 33,
+        "mae": 1.554558,
+        "ndcg_at_10": 0.070166,
+        "rmse": 2.372395,
+        "spearman": 0.0556,
+        "top_10_overlap": 0.006061
+      },
+      "starters": {
+        "bias": -2.435198,
+        "gameweeks": 33,
+        "mae": 2.666848,
+        "ndcg_at_10": 0.242525,
+        "rmse": 4.023289,
+        "spearman": -0.053293,
+        "top_10_overlap": 0.033333
+      }
+    },
+    "previous_five_mean": {
+      "all": {
+        "bias": 0.004688,
+        "gameweeks": 33,
+        "mae": 1.046104,
+        "ndcg_at_10": 0.280019,
+        "rmse": 2.115642,
+        "spearman": 0.720783,
+        "top_10_overlap": 0.081818
+      },
+      "starters": {
+        "bias": -0.693354,
+        "gameweeks": 33,
+        "mae": 2.622477,
+        "ndcg_at_10": 0.319017,
+        "rmse": 3.603175,
+        "spearman": 0.083102,
+        "top_10_overlap": 0.087879
+      }
+    },
+    "xp_v0_2": {
+      "all": {
+        "bias": -0.041591,
+        "gameweeks": 33,
+        "interval_coverage": 0.877667,
+        "mae": 1.099537,
+        "mean_interval_width": 5.082662,
+        "ndcg_at_10": 0.369927,
+        "rmse": 2.040619,
+        "spearman": 0.643385,
+        "top_10_overlap": 0.112121
+      },
+      "starters": {
+        "bias": -1.381354,
+        "gameweeks": 33,
+        "interval_coverage": 0.694602,
+        "mae": 2.359764,
+        "mean_interval_width": 5.035788,
+        "ndcg_at_10": 0.395822,
+        "rmse": 3.496633,
+        "spearman": 0.132401,
+        "top_10_overlap": 0.112121
+      }
+    },
+    "xp_v0_2_flat_team_challenger": {
+      "all": {
+        "bias": -0.039803,
+        "gameweeks": 33,
+        "interval_coverage": 0.876924,
+        "mae": 1.099973,
+        "mean_interval_width": 5.073396,
+        "ndcg_at_10": 0.369544,
+        "rmse": 2.040435,
+        "spearman": 0.643337,
+        "top_10_overlap": 0.112121
+      },
+      "starters": {
+        "bias": -1.375529,
+        "gameweeks": 33,
+        "interval_coverage": 0.693899,
+        "mae": 2.360366,
+        "mean_interval_width": 5.01963,
+        "ndcg_at_10": 0.391078,
+        "rmse": 3.495607,
+        "spearman": 0.130925,
+        "top_10_overlap": 0.112121
+      }
+    },
+    "xp_v0_2_full_team_prior_challenger": {
+      "all": {
+        "bias": -0.040633,
+        "gameweeks": 33,
+        "interval_coverage": 0.879362,
+        "mae": 1.098066,
+        "mean_interval_width": 5.08574,
+        "ndcg_at_10": 0.346727,
+        "rmse": 2.036736,
+        "spearman": 0.643344,
+        "top_10_overlap": 0.09697
+      },
+      "starters": {
+        "bias": -1.375878,
+        "gameweeks": 33,
+        "interval_coverage": 0.696547,
+        "mae": 2.356539,
+        "mean_interval_width": 5.045896,
+        "ndcg_at_10": 0.385829,
+        "rmse": 3.486792,
+        "spearman": 0.145759,
+        "top_10_overlap": 0.115152
+      }
+    },
+    "xp_v0_2_no_prior_season": {
+      "all": {
+        "bias": 0.036944,
+        "gameweeks": 33,
+        "interval_coverage": 0.88312,
+        "mae": 1.160284,
+        "mean_interval_width": 5.111198,
+        "ndcg_at_10": 0.367696,
+        "rmse": 2.036698,
+        "spearman": 0.647886,
+        "top_10_overlap": 0.106061
+      },
+      "starters": {
+        "bias": -1.314744,
+        "gameweeks": 33,
+        "interval_coverage": 0.697573,
+        "mae": 2.362958,
+        "mean_interval_width": 5.114097,
+        "ndcg_at_10": 0.38668,
+        "rmse": 3.485007,
+        "spearman": 0.120105,
+        "top_10_overlap": 0.112121
+      }
+    },
+    "xp_v0_2_position_priors_only": {
+      "all": {
+        "bias": -0.081629,
+        "gameweeks": 33,
+        "interval_coverage": 0.890747,
+        "mae": 1.095581,
+        "mean_interval_width": 5.218026,
+        "ndcg_at_10": 0.370222,
+        "rmse": 2.038648,
+        "spearman": 0.64808,
+        "top_10_overlap": 0.118182
+      },
+      "starters": {
+        "bias": -1.452253,
+        "gameweeks": 33,
+        "interval_coverage": 0.70306,
+        "mae": 2.383027,
+        "mean_interval_width": 5.239011,
+        "ndcg_at_10": 0.392151,
+        "rmse": 3.533458,
+        "spearman": 0.124501,
+        "top_10_overlap": 0.118182
+      }
+    },
+    "xp_v0_2_team_priors_only": {
+      "all": {
+        "bias": -0.080748,
+        "gameweeks": 33,
+        "interval_coverage": 0.892294,
+        "mae": 1.093702,
+        "mean_interval_width": 5.22064,
+        "ndcg_at_10": 0.350051,
+        "rmse": 2.033973,
+        "spearman": 0.648062,
+        "top_10_overlap": 0.112121
+      },
+      "starters": {
+        "bias": -1.446292,
+        "gameweeks": 33,
+        "interval_coverage": 0.707593,
+        "mae": 2.379338,
+        "mean_interval_width": 5.249757,
+        "ndcg_at_10": 0.380186,
+        "rmse": 3.523107,
+        "spearman": 0.137621,
+        "top_10_overlap": 0.115152
+      }
+    },
+    "zero": {
+      "all": {
+        "bias": -1.158049,
+        "gameweeks": 33,
+        "mae": 1.165762,
+        "ndcg_at_10": 0.06097,
+        "rmse": 2.642591,
+        "spearman": 0.0,
+        "top_10_overlap": 0.006061
+      },
+      "starters": {
+        "bias": -3.665314,
+        "gameweeks": 33,
+        "mae": 3.689029,
+        "ndcg_at_10": 0.237832,
+        "rmse": 4.866587,
+        "spearman": 0.0,
+        "top_10_overlap": 0.042424
+      }
+    }
+  },
+  "protocol": {
+    "aggregation": "metrics calculated within gameweek, then averaged",
+    "archive_fpl_xp_warning": "included for reference; exact capture timing is not verified",
+    "events": [
+      6,
+      38
+    ],
+    "information_cutoff": "only gameweeks strictly before the forecast event",
+    "season": "2025-26"
+  },
+  "row_counts": {
+    "all": 25750,
+    "starters": 7176
+  }
+}

@@ -1,4 +1,4 @@
-# Model card: `xp-v0.1.0`
+# Model card: `xp-v0.2.0`
 
 ## Intended use
 
@@ -11,19 +11,20 @@ and research baseline, not betting advice or a guaranteed rank-improvement syste
 - observed FPL player minutes, starts, price, ownership, availability, status, transfers,
   saves, cards, xG, xA, expected goals conceded, and defensive contributions;
 - current fixtures and home/away team identity;
-- FPL-calculated team attack and defence strength ratings;
-- position priors and explicit structural assumptions.
+- FPL ordinal home/away strength ratings, used because the legacy attack/defence fields
+  are currently zero in the live feed;
+- compact previous-season player, position and role aggregates keyed by stable FPL code.
 
 The model does not use paid feeds, paid AI, scraped news, bookmaker odds, or FPL's
 `ep_next` field as its prediction target or shortcut.
 
 ## Method
 
-1. Estimate start probability from starts plus a three-match prior informed by observed
-   ownership, price within position, and set-piece ordering.
-2. Shrink minutes per start to position defaults.
-3. Shrink xG, xA, and defensive-action rates with 450 prior minutes.
-4. Estimate team goals from home/away FPL team-strength ratios and Poisson assumptions.
+1. Estimate coherent probabilities of any appearance and 60+ minutes from current starts,
+   prior-season starts/substitute use and availability. Ownership is not a minutes input.
+2. Shrink minutes per start/cameo to player-history and position evidence.
+3. Hierarchically shrink xG, xA, saves, defensive actions, bonus and card rates.
+4. Estimate team goals from ordinal home/away strengths and Poisson assumptions.
 5. Allocate 86% of team goals and 74% of team assists across players by rate and xMins.
 6. Calculate FPL appearance, goal, assist, clean-sheet, save, defensive-contribution,
    approximate bonus, goals-conceded, and card components.
@@ -34,17 +35,18 @@ defenders or 12 CBIRT for midfielders/forwards, capped per fixture.
 
 ## Known limitations
 
-- Early-season roles are weakly identified. Ownership and price are noisy role proxies.
-- Team strength is not yet estimated from historical match results or an xG model.
+- Transfers, manager changes, new signings and promoted teams can break role persistence.
+- Ordinal team strengths are coarse; the previous-season team-xG challenger did not earn
+  promotion because it reduced ranking quality.
 - Bonus is an approximation and does not implement the complete 2026/27 BPS event model.
 - Goal/assist allocations are team-coherent but not yet learned from player history.
 - Injury/team-news data is limited to official FPL status/news.
-- Uncertainty bounds are heuristic, not empirically calibrated quantiles.
+- Uncertainty bounds are heuristic and covered only 69.5% of historical starters.
 - Correlation between player returns and match states is not simulated.
 
 ## Validation status
 
-Verified in v0.1:
+Verified in v0.2:
 
 - blank gameweeks produce zero fixtures and zero xP;
 - double-gameweek minutes and components accumulate;
@@ -53,24 +55,20 @@ Verified in v0.1:
 - outputs are ranked, finite, versioned, and range-consistent;
 - source/prediction persistence is idempotent;
 - manager cohort percentages use only successfully read entries;
-- the complete model ran on 609 live players and 380 fixtures.
+- the complete model ran on 609 live players and 380 fixtures;
+- forecasts remain immutable while outcomes are stored separately;
+- a real `xp-v0.2.0` pipeline persisted on an isolated Neon branch;
+- the benchmark covered GW6-38, 25,750 player-gameweeks and 7,176 starters.
 
-Not yet verified:
-
-- out-of-sample MAE/RMSE/calibration over a completed gameweek;
-- superiority to simple baselines such as last-season points, FPL `ep_next`, ownership,
-  or betting-implied team goals;
-- captain hit rate, transfer value added, or rank improvement.
+The historical benchmark is time-ordered within one archive, but is not a fully untouched
+test set because v0.2 decisions were made after reading the season-level report. Live
+pre-deadline evaluation, captain regret, transfer value and rank improvement remain unverified.
 
 ## Falsification plan
 
-For each final gameweek, compare at least:
-
-- `xp-v0.1.0`;
-- FPL `ep_next` captured pre-deadline;
-- naive position mean;
-- rolling points-per-90 with minutes shrinkage;
-- ownership-only ranking.
+For each final gameweek, compare immutable earliest- and latest-predeadline `xp-v0.2.0`
+runs with zero, last-gameweek, position mean, rolling-five mean and genuinely captured
+predeadline FPL xP.
 
 Report MAE, RMSE, bias, Spearman rank correlation, top-decile precision, calibration by
 xP bucket, and captain regret. Replace or recalibrate this model if it cannot beat the

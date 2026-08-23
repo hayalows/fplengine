@@ -47,13 +47,13 @@ class HTTPAPITests(unittest.TestCase):
     def test_health_is_dependency_free(self) -> None:
         status, payload = self.get_json("/health")
         self.assertEqual(status, 200)
-        self.assertEqual(payload, {"status": "ok", "version": "0.1.0"})
+        self.assertEqual(payload, {"status": "ok", "version": "0.2.0"})
 
     def test_rankings_returns_bounded_versioned_results(self) -> None:
         status, payload = self.get_json("/rankings?limit=2&position=MID")
         self.assertEqual(status, 200)
         self.assertEqual(payload["target_event"], 3)
-        self.assertEqual(payload["model_version"], "xp-v0.1.0")
+        self.assertEqual(payload["model_version"], "xp-v0.2.0")
         self.assertEqual(len(payload["results"]), 2)
         self.assertTrue(all(row["position"] == "MID" for row in payload["results"]))
 

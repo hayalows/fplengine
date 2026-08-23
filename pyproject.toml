@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fplengine"
-version = "0.1.0"
+version = "0.2.0"
 description = "Evidence-first Fantasy Premier League and Premier League intelligence engine"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,7 +23,7 @@ fplengine = "fplengine.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-fplengine = ["migrations/*.sql"]
+fplengine = ["migrations/*.sql", "data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

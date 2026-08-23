@@ -10,12 +10,12 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Callable
+from datetime import UTC, datetime
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-
 
 BASE_URL = "https://fantasy.premierleague.com/api"
 USER_AGENT = "fplengine/0.1 (+https://github.com/hayalows/fplengine)"
@@ -38,8 +38,8 @@ class Snapshot:
         bootstrap: dict[str, Any],
         fixtures: list[dict[str, Any]],
         fetched_at: datetime | None = None,
-    ) -> "Snapshot":
-        observed_at = fetched_at or datetime.now(timezone.utc)
+    ) -> Snapshot:
+        observed_at = fetched_at or datetime.now(UTC)
         canonical = json.dumps(
             {"bootstrap": bootstrap, "fixtures": fixtures},
             sort_keys=True,
@@ -128,6 +128,12 @@ class FPLClient:
 
     def entry_picks(self, entry_id: int, event_id: int) -> dict[str, Any]:
         return self._get(f"entry/{int(entry_id)}/event/{int(event_id)}/picks/")
+
+    def entry_transfers(self, entry_id: int) -> list[dict[str, Any]]:
+        payload = self._get(f"entry/{int(entry_id)}/transfers/")
+        if not isinstance(payload, list):
+            raise FPLAPIError(f"Entry {entry_id} transfers response was not a list")
+        return payload
 
     def classic_league_standings(self, league_id: int, page: int = 1) -> dict[str, Any]:
         return self._get(

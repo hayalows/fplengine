@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Iterable
+import math
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from statistics import median
+from typing import Any
 
 from .api_client import FPLClient, Snapshot
 from .model import Prediction
@@ -100,13 +103,13 @@ def build_report(snapshot: Snapshot, predictions: list[Prediction], limit: int =
 
 
 def latest_public_picks_event(snapshot: Snapshot) -> int:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     eligible: list[int] = []
     for event in snapshot.bootstrap["events"]:
         deadline = event.get("deadline_time")
         if not deadline:
             continue
-        observed = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+        observed = datetime.fromisoformat(deadline)
         if observed <= now:
             eligible.append(int(event["id"]))
     if not eligible:
@@ -217,16 +220,26 @@ def analyze_manager_cohort(
     *,
     league_id: int = 321,
     sample_size: int = 25,
+    candidate_pool_size: int | None = None,
+    minimum_past_seasons: int = 2,
+    include_transfers: bool = True,
     picks_event: int | None = None,
 ) -> dict[str, Any]:
-    if not 1 <= sample_size <= 100:
-        raise ValueError("sample_size must be between 1 and 100")
+    if not 1 <= sample_size <= 50:
+        raise ValueError("sample_size must be between 1 and 50")
+    pool_size = candidate_pool_size or min(200, max(50, sample_size * 3))
+    if not sample_size <= pool_size <= 200:
+        raise ValueError("candidate_pool_size must be between sample_size and 200")
+    if minimum_past_seasons < 1:
+        raise ValueError("minimum_past_seasons must be positive")
     public_event = picks_event or latest_public_picks_event(snapshot)
     standings_rows: list[dict[str, Any]] = []
     page = 1
     league_name = None
-    while len(standings_rows) < sample_size:
+    request_counts = {"standings": 0, "history": 0, "picks": 0, "transfers": 0}
+    while len(standings_rows) < pool_size:
         payload = client.classic_league_standings(league_id, page)
+        request_counts["standings"] += 1
         league_name = payload.get("league", {}).get("name") or league_name
         results = payload.get("standings", {}).get("results", [])
         if not results:
@@ -235,41 +248,106 @@ def analyze_manager_cohort(
         if not payload.get("standings", {}).get("has_next"):
             break
         page += 1
-    cohort = standings_rows[:sample_size]
-    if not cohort:
+    candidates = standings_rows[:pool_size]
+    if not candidates:
         raise ValueError(f"Classic league {league_id} returned no public managers")
-    prediction_by_player = {row.player_id: row for row in predictions}
-    player_counts: dict[int, int] = {}
-    captain_counts: dict[int, int] = {}
-    successful_entries: list[int] = []
     failures: list[dict[str, Any]] = []
-    for manager in cohort:
+    profiles: list[dict[str, Any]] = []
+    for manager in candidates:
         entry_id = int(manager["entry"])
         try:
-            picks = client.entry_picks(entry_id, public_event).get("picks", [])
-        except Exception as exc:
-            failures.append({"entry_id": entry_id, "error": type(exc).__name__})
+            history = client.entry_history(entry_id)
+            request_counts["history"] += 1
+        except Exception as exc:  # noqa: BLE001 - isolate one public-entry failure
+            failures.append({"phase": "history", "error": type(exc).__name__})
             continue
-        successful_entries.append(entry_id)
+        past = [
+            row
+            for row in history.get("past", [])
+            if _positive_int(row.get("rank")) is not None
+        ]
+        recent = past[-5:]
+        if recent:
+            weights = list(range(1, len(recent) + 1))
+            log_rank = sum(
+                weight * math.log10(max(1, int(row["rank"])))
+                for weight, row in zip(weights, recent)
+            ) / sum(weights)
+            strength_score = 10**log_rank
+            ranks = [int(row["rank"]) for row in recent]
+        else:
+            strength_score = float("inf")
+            ranks = []
+        profiles.append(
+            {
+                "entry_id": entry_id,
+                "past_seasons": len(past),
+                "recent_ranks": ranks,
+                "strength_score": strength_score,
+                "proven": len(past) >= minimum_past_seasons,
+            }
+        )
+    profiles.sort(key=lambda row: (not row["proven"], row["strength_score"]))
+    cohort = [row for row in profiles if row["proven"]][:sample_size]
+    if not cohort:
+        raise ValueError(
+            f"No manager had the required {minimum_past_seasons} ranked past seasons"
+        )
+    prediction_by_player = {row.player_id: row for row in predictions}
+    player_by_id = {int(row["id"]): row for row in snapshot.bootstrap["elements"]}
+    player_counts: dict[int, int] = {}
+    captain_counts: dict[int, int] = {}
+    transfers_in: dict[int, int] = {}
+    transfers_out: dict[int, int] = {}
+    successful_entries = 0
+    for manager in cohort:
+        entry_id = int(manager["entry_id"])
+        try:
+            picks = client.entry_picks(entry_id, public_event).get("picks", [])
+            request_counts["picks"] += 1
+        except Exception as exc:  # noqa: BLE001 - isolate one public-entry failure
+            failures.append({"phase": "picks", "error": type(exc).__name__})
+            continue
+        successful_entries += 1
         for pick in picks:
             player_id = int(pick["element"])
             player_counts[player_id] = player_counts.get(player_id, 0) + 1
             if pick.get("is_captain"):
                 captain_counts[player_id] = captain_counts.get(player_id, 0) + 1
+        if include_transfers and hasattr(client, "entry_transfers"):
+            try:
+                request_counts["transfers"] += 1
+                transfers = client.entry_transfers(entry_id)
+                for transfer in transfers:
+                    if int(transfer.get("event") or 0) != public_event:
+                        continue
+                    player_in = int(transfer["element_in"])
+                    player_out = int(transfer["element_out"])
+                    transfers_in[player_in] = transfers_in.get(player_in, 0) + 1
+                    transfers_out[player_out] = transfers_out.get(player_out, 0) + 1
+            except Exception as exc:  # noqa: BLE001 - optional endpoint must not fail cohort
+                failures.append({"phase": "transfers", "error": type(exc).__name__})
 
-    denominator = len(successful_entries)
+    denominator = successful_entries
     if denominator == 0:
         raise ValueError("No manager picks in the cohort could be read")
 
     def consensus_row(item: tuple[int, int], captain: bool = False) -> dict[str, Any]:
         player_id, count = item
         prediction = prediction_by_player.get(player_id)
+        observed = player_by_id.get(player_id, {})
+        general_ownership = float(observed.get("selected_by_percent") or 0)
+        cohort_percent = 100.0 * count / denominator
         return {
             "player_id": player_id,
             "name": prediction.player_name if prediction else None,
             "team": prediction.team if prediction else None,
             "selection_count" if not captain else "captain_count": count,
-            "cohort_percent": round(100.0 * count / denominator, 2),
+            "cohort_percent": round(cohort_percent, 2),
+            "general_ownership_percent": round(general_ownership, 2) if not captain else None,
+            "ownership_delta_percentage_points": (
+                round(cohort_percent - general_ownership, 2) if not captain else None
+            ),
             "next_event_xp": prediction.expected_points if prediction else None,
             "next_event_risk": prediction.risk if prediction else None,
         }
@@ -282,22 +360,77 @@ def analyze_manager_cohort(
         consensus_row(item, captain=True)
         for item in sorted(captain_counts.items(), key=lambda item: item[1], reverse=True)[:10]
     ]
+    transfer_activity = []
+    transfer_player_ids = set(transfers_in) | set(transfers_out)
+    for player_id in sorted(
+        transfer_player_ids,
+        key=lambda value: transfers_in.get(value, 0) - transfers_out.get(value, 0),
+        reverse=True,
+    )[:20]:
+        prediction = prediction_by_player.get(player_id)
+        transfer_activity.append(
+            {
+                "player_id": player_id,
+                "name": prediction.player_name if prediction else None,
+                "transfers_in": transfers_in.get(player_id, 0),
+                "transfers_out": transfers_out.get(player_id, 0),
+                "net_transfers": transfers_in.get(player_id, 0) - transfers_out.get(player_id, 0),
+                "next_event_xp": prediction.expected_points if prediction else None,
+            }
+        )
+    cohort_selection = {
+        row["player_id"]: row["cohort_percent"] for row in selection_consensus
+    }
+    model_divergence = [
+        {
+            "player_id": row.player_id,
+            "name": row.player_name,
+            "next_event_xp": row.expected_points,
+            "cohort_percent": cohort_selection.get(row.player_id, 0.0),
+            "general_ownership_percent": row.ownership_percent,
+        }
+        for row in predictions[:20]
+        if cohort_selection.get(row.player_id, 0.0) + 10.0 < row.ownership_percent
+    ][:10]
+    proven = [row for row in cohort if row["proven"]]
+    finite_scores = [row["strength_score"] for row in cohort if math.isfinite(row["strength_score"])]
     return {
         "metadata": {
             "league_id": league_id,
             "league_name": league_name,
+            "candidate_pool_requested": pool_size,
+            "candidate_histories_read": len(profiles),
+            "historically_qualified": sum(row["proven"] for row in profiles),
             "requested_sample": sample_size,
             "successful_sample": denominator,
+            "proven_managers_selected": len(proven),
+            "minimum_past_seasons": minimum_past_seasons,
+            "median_recency_weighted_historical_rank": (
+                round(median(finite_scores)) if finite_scores else None
+            ),
             "picks_observed_event": public_event,
             "prediction_target_event": predictions[0].target_event,
             "data_as_of": snapshot.fetched_at.isoformat(),
+            "public_api_requests": request_counts,
         },
         "selection_consensus": selection_consensus,
         "captain_consensus": captain_consensus,
+        "transfer_activity": transfer_activity,
+        "model_divergence": model_divergence,
         "failures": failures,
         "limitations": [
             "This is descriptive consensus, not evidence that copying the cohort improves rank.",
-            "The default cohort qualified through prior-season top-1% performance and is survivorship-selected.",
-            "Small samples are unstable; expand only while respecting the public API.",
+            "The candidate league is prior-season top-1% and therefore survivorship-selected.",
+            "Official selected_by_percent is the population ownership comparator; population captaincy is unavailable.",
+            "Historical rank is a repeat-performance filter, not a causal manager-skill estimate.",
+            "Run this bounded cohort refresh weekly and cache aggregates rather than polling managers every ingestion.",
         ],
     }
+
+
+def _positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None

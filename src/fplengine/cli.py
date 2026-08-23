@@ -6,11 +6,15 @@ import argparse
 import json
 import os
 import sys
-from typing import Any, Iterable
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
 
 from .api_client import FPLAPIError, FPLClient
+from .benchmark import SeasonArchive, benchmark_season, write_benchmark_report
 from .http_api import serve
 from .model import ExpectedPointsModel, Prediction
+from .priors import build_prior_payload, write_prior_payload
 from .service import analyze_manager, analyze_manager_cohort, build_report, filter_rankings
 from .storage import Store
 
@@ -129,6 +133,9 @@ def command_elite(args: argparse.Namespace) -> None:
             league_id=args.league_id,
             sample_size=args.sample,
             picks_event=args.picks_event,
+            candidate_pool_size=args.candidate_pool,
+            minimum_past_seasons=args.minimum_past_seasons,
+            include_transfers=not args.no_transfers,
         )
     )
 
@@ -144,7 +151,9 @@ def command_evaluate(args: argparse.Namespace) -> None:
         int(row["id"]): int(row.get("stats", {}).get("total_points") or 0)
         for row in payload.get("elements", [])
     }
-    result = Store(args.database_url).evaluate(args.event_id, actual, event["deadline_time"])
+    result = Store(args.database_url).evaluate(
+        args.event_id, actual, event["deadline_time"], policy=args.policy
+    )
     result.update(
         {
             "event": args.event_id,
@@ -170,7 +179,9 @@ def command_evaluate_latest(args: argparse.Namespace) -> None:
         for row in payload.get("elements", [])
     }
     try:
-        result = Store(args.database_url).evaluate(event_id, actual, event["deadline_time"])
+        result = Store(args.database_url).evaluate(
+            event_id, actual, event["deadline_time"], policy=args.policy
+        )
     except ValueError as exc:
         _json({"status": "skipped", "event": event_id, "reason": str(exc)})
         return
@@ -191,8 +202,35 @@ def command_init_db(args: argparse.Namespace) -> None:
     _json({"status": "initialized", "database": "postgres" if store.is_postgres else "sqlite"})
 
 
+def command_build_priors(args: argparse.Namespace) -> None:
+    payload = build_prior_payload(Path(args.season_dir), args.season)
+    write_prior_payload(payload, Path(args.output))
+    _json(
+        {
+            "status": "written",
+            "season": args.season,
+            "players": len(payload["players"]),
+            "teams": len(payload["teams"]),
+            "output": str(Path(args.output).resolve()),
+        }
+    )
+
+
+def command_benchmark(args: argparse.Namespace) -> None:
+    priors = json.loads(Path(args.priors).read_text(encoding="utf-8"))
+    report = benchmark_season(
+        SeasonArchive(Path(args.season_dir)),
+        priors,
+        first_event=args.from_event,
+        last_event=args.to_event,
+    )
+    if args.output:
+        write_benchmark_report(report, Path(args.output))
+    _json(report)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="fplengine", description="FPL Engine v0.1")
+    parser = argparse.ArgumentParser(prog="fplengine", description="FPL Engine v0.2")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     common = argparse.ArgumentParser(add_help=False)
@@ -224,6 +262,9 @@ def build_parser() -> argparse.ArgumentParser:
     elite = subparsers.add_parser("elite", help="Analyse consensus in a strong-manager cohort")
     elite.add_argument("--league-id", type=int, default=321, help="Defaults to Top 1%% 25/26")
     elite.add_argument("--sample", type=int, default=25)
+    elite.add_argument("--candidate-pool", type=int, help="Candidates to history-screen, max 200")
+    elite.add_argument("--minimum-past-seasons", type=int, default=2)
+    elite.add_argument("--no-transfers", action="store_true", help="Skip transfer aggregation")
     elite.add_argument("--event", type=int, help="Prediction target gameweek")
     elite.add_argument("--picks-event", type=int, help="Already-deadlined picks gameweek")
     elite.set_defaults(func=command_elite)
@@ -231,17 +272,45 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate = subparsers.add_parser("evaluate", help="Score a stored prediction run")
     evaluate.add_argument("event_id", type=int)
     evaluate.add_argument("--database-url")
+    evaluate.add_argument(
+        "--policy",
+        choices=["earliest_predeadline", "latest_predeadline"],
+        default="latest_predeadline",
+    )
     evaluate.set_defaults(func=command_evaluate)
 
     evaluate_latest = subparsers.add_parser(
         "evaluate-latest", help="Evaluate the latest final gameweek if a pre-deadline run exists"
     )
     evaluate_latest.add_argument("--database-url")
+    evaluate_latest.add_argument(
+        "--policy",
+        choices=["earliest_predeadline", "latest_predeadline"],
+        default="latest_predeadline",
+    )
     evaluate_latest.set_defaults(func=command_evaluate_latest)
 
     init_db = subparsers.add_parser("init-db", help="Apply the idempotent database schema")
     init_db.add_argument("--database-url")
     init_db.set_defaults(func=command_init_db)
+
+    build_priors = subparsers.add_parser(
+        "build-priors", help="Build compact prior-season evidence from a Vaastav archive"
+    )
+    build_priors.add_argument("season_dir")
+    build_priors.add_argument("--season", required=True)
+    build_priors.add_argument("--output", required=True)
+    build_priors.set_defaults(func=command_build_priors)
+
+    benchmark = subparsers.add_parser(
+        "benchmark", help="Run a leakage-aware walk-forward historical benchmark"
+    )
+    benchmark.add_argument("season_dir")
+    benchmark.add_argument("--priors", required=True)
+    benchmark.add_argument("--from-event", type=int, default=6)
+    benchmark.add_argument("--to-event", type=int, default=38)
+    benchmark.add_argument("--output")
+    benchmark.set_defaults(func=command_benchmark)
 
     api = subparsers.add_parser("api", help="Serve the read-only JSON API")
     api.add_argument("--host", default="127.0.0.1")

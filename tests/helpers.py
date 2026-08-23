@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fplengine.api_client import Snapshot
 
@@ -126,5 +126,5 @@ def snapshot(*, double: bool = False, blank: bool = False) -> Snapshot:
         "total_players": 1000000,
     }
     return Snapshot.from_payloads(
-        bootstrap, fixtures, datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
+        bootstrap, fixtures, datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
     )
