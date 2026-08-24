@@ -1,0 +1,56 @@
+name: Component history research
+
+on:
+  push:
+    branches:
+      - research/component-history-run
+  pull_request:
+    paths:
+      - src/fplengine/component_history.py
+      - src/fplengine/component_history_benchmark.py
+      - research/run_component_history.py
+      - .github/workflows/component-history-research.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: component-history-research-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -e .
+      - name: Fetch only historical files required by the benchmark
+        shell: bash
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/vaastav/Fantasy-Premier-League.git /tmp/vaastav
+          cd /tmp/vaastav
+          git sparse-checkout set --no-cone \
+            /data/2016-17/players_raw.csv /data/2016-17/teams.csv /data/2016-17/fixtures.csv /data/2016-17/gws/ \
+            /data/2017-18/players_raw.csv /data/2017-18/teams.csv /data/2017-18/fixtures.csv /data/2017-18/gws/ \
+            /data/2018-19/players_raw.csv /data/2018-19/teams.csv /data/2018-19/fixtures.csv /data/2018-19/gws/ \
+            /data/2019-20/players_raw.csv /data/2019-20/teams.csv /data/2019-20/fixtures.csv /data/2019-20/gws/ \
+            /data/2020-21/players_raw.csv /data/2020-21/teams.csv /data/2020-21/fixtures.csv /data/2020-21/gws/ \
+            /data/2021-22/players_raw.csv /data/2021-22/teams.csv /data/2021-22/fixtures.csv /data/2021-22/gws/ \
+            /data/2022-23/players_raw.csv /data/2022-23/teams.csv /data/2022-23/fixtures.csv /data/2022-23/gws/ \
+            /data/2023-24/players_raw.csv /data/2023-24/teams.csv /data/2023-24/fixtures.csv /data/2023-24/gws/ \
+            /data/2024-25/players_raw.csv /data/2024-25/teams.csv /data/2024-25/fixtures.csv /data/2024-25/gws/ \
+            /data/2025-26/players_raw.csv /data/2025-26/teams.csv /data/2025-26/fixtures.csv /data/2025-26/gws/
+      - name: Run component-specific held-out benchmark
+        run: python research/run_component_history.py --data-root /tmp/vaastav/data
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: component-history-2025-26
+          path: reports/component_history_2025_26.json
+          if-no-files-found: ignore
+          retention-days: 7
