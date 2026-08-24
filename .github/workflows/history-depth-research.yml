@@ -6,12 +6,19 @@ on:
       - research/history-depth-run
     paths-ignore:
       - reports/history_depth_2025_26.json
+  pull_request:
+    paths:
+      - src/fplengine/historical.py
+      - src/fplengine/historical_model.py
+      - src/fplengine/history_benchmark.py
+      - research/run_history_depth.py
+      - .github/workflows/history-depth-research.yml
 
 permissions:
   contents: write
 
 concurrency:
-  group: history-depth-research
+  group: history-depth-research-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -43,7 +50,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - name: Commit research report to this branch
-        if: success()
+        if: success() && github.event_name == 'push'
         shell: bash
         run: |
           git config user.name "fplengine-research-bot"
