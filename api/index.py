@@ -13,6 +13,7 @@ import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +78,15 @@ def _requested_tab(path: str) -> str:
     return "myteam"
 
 
+def _normalize_persisted_types(payload: dict[str, Any]) -> None:
+    """Make Postgres-native scalar types safe for the existing HTML renderer."""
+    changes = payload.get("changes_since_previous_snapshot") or {}
+    for key in ("previous_captured_at", "latest_captured_at"):
+        value = changes.get(key)
+        if value is not None and hasattr(value, "isoformat"):
+            changes[key] = value.isoformat()
+
+
 class handler(BaseHTTPRequestHandler):
     """Single Vercel Function serving all website tabs through rewrites."""
 
@@ -97,6 +107,7 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             payload = _CACHE.get()
+            _normalize_persisted_types(payload)
             body = page(_requested_tab(self.path), payload).encode("utf-8")
         except Exception as exc:  # keep deployment failures observable, not silent
             print(f"FPL Engine request failed: {type(exc).__name__}: {exc}")
