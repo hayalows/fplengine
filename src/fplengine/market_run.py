@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .api_client import FPLClient
+from .market import parse_timestamp
 from .storage import Store
 
 
@@ -43,6 +44,33 @@ def market_source_hash(elements: list[dict[str, Any]]) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def _current_event_id(events: list[dict[str, Any]], captured_at: str) -> int | None:
+    """Return the gameweek whose transfer counters a poll's snapshot belongs to.
+
+    Official counters reset at each deadline, so a poll between deadline N and
+    deadline N+1 accumulates into the next upcoming gameweek. Falls back to the
+    last finished gameweek once the season has ended.
+    """
+    moment = parse_timestamp(captured_at)
+    if moment is None:
+        return None
+    upcoming = []
+    for row in events:
+        deadline = parse_timestamp(row.get("deadline_time"))
+        if deadline is None:
+            continue
+        if deadline > moment:
+            upcoming.append((deadline, int(row["id"])))
+    if upcoming:
+        return min(upcoming)[1]
+    finished = [
+        (parse_timestamp(row.get("deadline_time")), int(row["id"]))
+        for row in events
+        if row.get("finished") and parse_timestamp(row.get("deadline_time")) is not None
+    ]
+    return max(finished)[1] if finished else None
+
+
 def run_once(database_url: str | None = None) -> dict[str, Any]:
     """Poll once without applying schema migrations (least-privilege friendly)."""
     client = FPLClient()
@@ -55,9 +83,15 @@ def run_once(database_url: str | None = None) -> dict[str, Any]:
         raise RuntimeError("market_run requires a PostgreSQL production database")
 
     captured_at = datetime.now(UTC).isoformat()
-    events_saved = store.save_season_events(bootstrap.get("events") or [], captured_at)
+    events = bootstrap.get("events") or []
+    events_saved = store.save_season_events(events, captured_at)
     source_hash = market_source_hash(elements)
-    poll_id, inserted = store.save_market_poll(elements, captured_at, source_hash)
+    poll_id, inserted = store.save_market_poll(
+        elements,
+        captured_at,
+        source_hash,
+        event_id=_current_event_id(events, captured_at),
+    )
     pruned = store.prune_market_history() if inserted else 0
     return {
         "status": "ok",

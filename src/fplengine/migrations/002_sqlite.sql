@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS market_poll (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_hash CHAR(64) NOT NULL UNIQUE CHECK (length(source_hash) = 64),
     captured_at TEXT NOT NULL,
+    event_id SMALLINT,
     player_count INTEGER NOT NULL CHECK (player_count >= 0)
 );
 
@@ -43,3 +44,6 @@ CREATE TABLE IF NOT EXISTS market_state (
 -- Deliberately no foreign key on market_state.player_id: a newly added FPL player
 -- must be capturable before the slower six-hourly identity ingestion runs.
 CREATE INDEX IF NOT EXISTS market_state_player_idx ON market_state(player_id, poll_id);
+
+-- event_id notes which gameweek a poll's transfer counters belong to (counters
+-- reset at every deadline), so derived deltas never cross gameweek boundaries.

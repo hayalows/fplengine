@@ -88,6 +88,14 @@ class ReferencePollTests(unittest.TestCase):
         for window in (1.0, 6.0, 24.0):
             self.assertIsNone(references[window])
 
+    def test_current_poll_is_never_its_own_reference(self) -> None:
+        # Even when schedule pauses make the newest poll old enough to qualify,
+        # comparing it against itself would report zero movement.
+        polls = [self._poll(1, 2.0)]
+        references = select_reference_polls(polls, NOW, exclude_ids={1})
+        for window in (1.0, 6.0, 24.0):
+            self.assertIsNone(references[window])
+
 
 class PlayerMarketRowTests(unittest.TestCase):
     def _current(self, **overrides) -> dict:
@@ -188,8 +196,7 @@ class PressureLevelTests(unittest.TestCase):
 def _store_with_history(db_path: Path) -> Store:
     store = Store(f"sqlite:///{db_path.as_posix()}")
     store.initialize()
-    base = NOW - timedelta(days=10)
-    # Four polls: 10d, 6h, 1h and just now; the oldest uses a pre-rise price.
+    base = NOW - timedelta(days=10)    # Four polls: 10d, 6h, 1h and just now; the oldest uses a pre-rise price.
     schedule = [
         (base, [_element(1, now_cost=69), _element(2, now_cost=85)]),
         (
@@ -216,7 +223,10 @@ def _store_with_history(db_path: Path) -> Store:
     ]
     for index, (moment, elements) in enumerate(schedule):
         poll_id, inserted = store.save_market_poll(
-            elements, _iso(moment), f"{index:064d}"
+            elements,
+            _iso(moment),
+            f"{index:064d}",
+            event_id=3 if index > 0 else 2,
         )
         assert inserted
     return store
@@ -244,6 +254,21 @@ class MarketViewIntegrationTests(unittest.TestCase):
         selling = by_id[2]
         self.assertEqual(selling["pressure_direction"], "DOWN")
         self.assertEqual(selling["status"], "d")
+
+    def test_counter_deltas_never_cross_gameweek_boundaries(self) -> None:
+        # The 10-day-old reference belongs to a previous gameweek (event 2) while
+        # the newest poll is event 3: official counters reset at deadlines, so the
+        # 24h transfer delta is suppressed - but price/ownership stay observable.
+        # The 6h reference shares the current gameweek, so its deltas remain.
+        polls = self.store.market_polls()
+        states = self.store.market_states([row["id"] for row in polls])
+        view = build_market_view(polls, states, now=NOW)
+        by_id = {row["player_id"]: row for row in view["players"]}
+        rising = by_id[1]
+        self.assertIsNone(rising["net_transfers_24h"])
+        self.assertIsNotNone(rising["net_transfers_6h"])
+        self.assertIsNotNone(rising["price_change_24h"])
+        self.assertIsNotNone(rising["ownership_change_24h"])
 
     def test_duplicate_market_state_is_idempotent(self) -> None:
         elements = [_element(1), _element(2)]
@@ -346,6 +371,23 @@ class MarketEventTests(unittest.TestCase):
 
 
 class MarketRunTests(unittest.TestCase):
+    def test_current_event_resolution(self) -> None:
+        from fplengine.market_run import _current_event_id
+
+        events = [
+            {"id": 1, "deadline_time": "2026-08-10T18:00:00Z", "finished": True},
+            {"id": 2, "deadline_time": "2026-08-24T18:00:00Z", "finished": False},
+            {"id": 3, "deadline_time": "2026-08-31T18:00:00Z", "finished": False},
+        ]
+        # Between GW2's deadline and GW3's, counters accumulate into GW3.
+        self.assertEqual(
+            _current_event_id(events, "2026-08-24T19:00:00Z"), 3
+        )
+        # Before GW2's deadline, counters belong to GW2 itself.
+        self.assertEqual(
+            _current_event_id(events, "2026-08-24T09:00:00Z"), 2
+        )
+
     def test_run_once_persists_poll_and_events_without_model(self) -> None:
         bootstrap = {
             "elements": [_element(1), _element(2)],
@@ -365,8 +407,10 @@ class MarketRunTests(unittest.TestCase):
 
             store.save_season_events.assert_called_once()
             args = store.save_market_poll.call_args.args
+            kwargs = store.save_market_poll.call_args.kwargs
             self.assertEqual(args[0], bootstrap["elements"])
             self.assertEqual(len(args[2]), 64)
+            self.assertIn("event_id", kwargs)
             store.prune_market_history.assert_called_once_with()
             self.assertTrue(result["inserted"])
             self.assertEqual(result["poll_id"], 31)

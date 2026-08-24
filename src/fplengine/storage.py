@@ -578,12 +578,18 @@ class Store:
             ]
 
     def save_market_poll(
-        self, elements: list[dict[str, Any]], captured_at: str, source_hash: str
+        self,
+        elements: list[dict[str, Any]],
+        captured_at: str,
+        source_hash: str,
+        event_id: int | None = None,
     ) -> tuple[int, bool]:
         """Persist one lightweight market snapshot. Returns (poll_id, was_inserted).
 
-        Identical market states dedupe on source_hash so double-triggered schedules
-        do not grow history; the existing poll id is returned in that case.
+        ``event_id`` records which gameweek the transfer counters belong to, because
+        the official counters reset at every deadline. Identical market states dedupe
+        on source_hash so double-triggered schedules do not grow history; the existing
+        poll id is returned in that case.
         """
         polls = self._table("market_poll")
         states = self._table("market_state")
@@ -592,11 +598,11 @@ class Store:
             cursor.execute(
                 self._sql(
                     f"""INSERT INTO {polls}
-                    (source_hash, captured_at, player_count)
-                    VALUES (?, ?, ?)
+                    (source_hash, captured_at, event_id, player_count)
+                    VALUES (?, ?, ?, ?)
                     ON CONFLICT (source_hash) DO NOTHING"""
                 ),
-                (source_hash, captured_at, len(elements)),
+                (source_hash, captured_at, event_id, len(elements)),
             )
             inserted = cursor.rowcount > 0
             cursor.execute(
@@ -638,7 +644,7 @@ class Store:
             cursor = connection.cursor()
             cursor.execute(
                 self._sql(
-                    f"""SELECT id, captured_at, player_count FROM {polls}
+                    f"""SELECT id, captured_at, event_id, player_count FROM {polls}
                     ORDER BY captured_at DESC LIMIT {int(limit)}"""
                 ),
                 (),
@@ -647,6 +653,9 @@ class Store:
                 {
                     "id": int(row["id"]),
                     "captured_at": self._iso(row["captured_at"]),
+                    "event_id": (
+                        int(row["event_id"]) if row["event_id"] is not None else None
+                    ),
                     "player_count": int(row["player_count"]),
                 }
                 for row in cursor.fetchall()

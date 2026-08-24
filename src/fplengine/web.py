@@ -332,6 +332,16 @@ def _attach_team_strength(payload: dict[str, Any]) -> None:
             pass
 
 
+def _persisted_deadline(store: Store, target_event: int) -> str | None:
+    """Deadline for the gameweek from persisted season metadata (no FPL calls)."""
+    try:
+        events = store.season_events()
+    except Exception:  # noqa: BLE001 - missing table must not break the read path
+        return None
+    row = next((item for item in events if item["id"] == target_event), None)
+    return (row or {}).get("deadline_time")
+
+
 def build_persisted_cockpit(
     store: Store,
 ) -> tuple[dict[str, Any], Snapshot, list[Prediction]] | None:
@@ -418,7 +428,7 @@ def build_persisted_cockpit(
                 "is_current": False,
                 "is_next": True,
                 "finished": False,
-                "deadline_time": None,
+                "deadline_time": _persisted_deadline(store, run["target_event"]),
             }
         ],
         "elements": observations["elements"],

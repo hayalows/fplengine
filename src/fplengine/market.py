@@ -59,15 +59,19 @@ def select_reference_polls(
     polls: list[dict[str, Any]],
     now: datetime,
     windows: tuple[float, ...] = _REFERENCE_WINDOWS_HOURS,
+    exclude_ids: set[int] | None = None,
 ) -> dict[float, dict[str, Any] | None]:
     """Pick, per window, the newest poll at least 75% of the window old.
 
-    Using the actual age of the chosen poll (instead of pretending exactly 1h/6h/
-    24h elapsed) keeps every derived figure honest under schedule drift. Polls are
-    newest-first as returned by Store.market_polls().
+    Ages are anchored to ``now`` - callers pass the newest poll's timestamp so
+    schedule drift never distorts elapsed times. ``exclude_ids`` (at minimum the
+    current poll) is skipped so a poll can never be compared against itself.
     """
+    excluded = exclude_ids or set()
     parsed = []
     for row in polls:
+        if int(row["id"]) in excluded:
+            continue
         timestamp = parse_timestamp(row["captured_at"])
         if timestamp is not None:
             parsed.append((int(row["id"]), str(row["captured_at"]), hours_between(now, timestamp)))
@@ -102,13 +106,19 @@ def player_market_row(
     current: dict[str, Any],
     references: dict[float, tuple[dict[str, Any] | None, float]],
     history_costs: list[tuple[str, int]] | None = None,
+    counters_valid: dict[float, bool] | None = None,
 ) -> dict[str, Any]:
     """Build one player's derived market features.
 
     ``references`` maps window hours to (reference_state_or_None, actual_age_hours).
-    A missing reference state means the player was absent from that snapshot (new
-    entrant); deltas are None rather than fabricated zeros.
+    ``counters_valid`` marks whether each window's reference stays inside the same
+    gameweek as the current poll - official transfer counters reset at deadlines, so
+    cross-gameweek subtractions are meaningless and are reported as None instead.
+    Price and ownership never reset, so their deltas ignore this gate. A missing
+    reference state means the player was absent from that snapshot (new entrant);
+    deltas are None rather than fabricated zeros.
     """
+    gates = counters_valid or {}
     current_net = net_transfers(current)
     row: dict[str, Any] = {
         "player_id": player_id,
@@ -138,11 +148,11 @@ def player_market_row(
         key = f"{int(window)}h" if float(window).is_integer() else f"{window}h"
         if ref_state is None or age_hours <= 0:
             continue
-        net_delta = current_net - net_transfers(ref_state)
-        row[f"net_transfers_{key}"] = net_delta
-        row[f"velocity_per_hour_{key}"] = round(net_delta / age_hours, 1)
-        ownership_key = f"ownership_change_{key}"
-        row[ownership_key] = round(
+        if gates.get(window, True):
+            net_delta = current_net - net_transfers(ref_state)
+            row[f"net_transfers_{key}"] = net_delta
+            row[f"velocity_per_hour_{key}"] = round(net_delta / age_hours, 1)
+        row[f"ownership_change_{key}"] = round(
             float(current.get("selected_percent") or 0.0)
             - float(ref_state.get("selected_percent") or 0.0),
             3,
@@ -153,10 +163,10 @@ def player_market_row(
                 (int(current.get("now_cost") or 0) - int(ref_state.get("now_cost") or 0)) / 10.0,
                 1,
             )
-        if abs(window - 6.0) < 1e-9:
-            velocity_6h = net_delta / age_hours
-        if abs(window - 1.0) < 1e-9:
-            velocity_1h = net_delta / age_hours
+        if abs(window - 6.0) < 1e-9 and gates.get(window, True):
+            velocity_6h = (row["net_transfers_6h"] or 0) / age_hours
+        if abs(window - 1.0) < 1e-9 and gates.get(window, True):
+            velocity_1h = (row["net_transfers_1h"] or 0) / age_hours
 
     if velocity_1h is not None and velocity_6h not in (None, 0.0):
         row["acceleration"] = round(velocity_1h / velocity_6h, 2)
@@ -196,13 +206,24 @@ def build_market_view(
     *,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Assemble derived market features for every player in the newest poll."""
-    moment = now or datetime.now(UTC)
+    """Assemble derived market features for every player in the newest poll.
+
+    ``now`` defaults to the newest stored poll timestamp so reference windows are
+    anchored to the data itself rather than to wall-clock time. The current poll is
+    never compared against itself, and transfer-counter deltas are only computed
+    when a reference poll belongs to the same gameweek (``event_id`` match) because
+    the official counters reset at every deadline; price and ownership never reset,
+    so their deltas remain valid across gameweeks.
+    """
     if not polls:
         return {"available": False, "reason": "no market polls stored yet"}
+    moment = now or parse_timestamp(polls[0]["captured_at"]) or datetime.now(UTC)
     current_poll = polls[0]
     current_states = states.get(current_poll["id"], {})
-    references = select_reference_polls(polls, moment)
+    current_event = current_poll.get("event_id")
+    references = select_reference_polls(
+        polls, moment, exclude_ids={int(current_poll["id"])}
+    )
     ordered_polls = sorted(
         ((str(row["captured_at"]), int(row["id"])) for row in polls),
         key=lambda item: item[0],
@@ -210,21 +231,37 @@ def build_market_view(
     rows: list[dict[str, Any]] = []
     for player_id, current in sorted(current_states.items()):
         per_player_refs: dict[float, tuple[dict[str, Any] | None, float]] = {}
+        counters_valid: dict[float, bool] = {}
         for window, reference in references.items():
             if reference is None:
                 per_player_refs[window] = (None, 0.0)
-            else:
-                per_player_refs[window] = (
-                    states.get(reference["poll_id"], {}).get(player_id),
-                    reference["age_hours"],
-                )
+                counters_valid[window] = False
+                continue
+            ref_row = next(
+                (row for row in polls if int(row["id"]) == int(reference["poll_id"])),
+                None,
+            )
+            same_event = (
+                current_event is not None
+                and ref_row is not None
+                and ref_row.get("event_id") == current_event
+            )
+            per_player_refs[window] = (
+                states.get(reference["poll_id"], {}).get(player_id),
+                reference["age_hours"],
+            )
+            counters_valid[window] = bool(same_event)
         history_costs: list[tuple[str, int]] = []
         for captured_at, poll_id in ordered_polls:
             state = states.get(poll_id, {}).get(player_id)
             if state is None:
                 continue
             history_costs.append((captured_at, int(state.get("now_cost") or 0)))
-        rows.append(player_market_row(player_id, current, per_player_refs, history_costs))
+        rows.append(
+            player_market_row(
+                player_id, current, per_player_refs, history_costs, counters_valid
+            )
+        )
     return {
         "available": True,
         "captured_at": current_poll["captured_at"],
