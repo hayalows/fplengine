@@ -5,20 +5,90 @@ home-advantage term, optionally with a Dixon-Coles low-score correction. It is
 intentionally separate from the FPL player model so it can power fixture projections,
 captaincy ceilings, and general PL analysis without coupling to any model version.
 
-Fitting is closed-form coordinate ascent on the weighted Poisson likelihood (no
-third-party dependencies), and evaluation is walk-forward by match time so no target
-match ever contributes to its own fit.
+Model: lambda_home = exp(home_advantage + attack_home + defence_away) and
+lambda_away = exp(attack_away + defence_home). The coordinate-ascent updates are the
+exact stationarity conditions of the weighted Poisson log-likelihood under this
+parametrisation; in particular exp(home_advantage) enters the attack exposure of home
+fixtures and the defence exposure of away fixtures. This is verified numerically by
+finite-difference gradient tests and parameter-recovery tests.
+
+Evaluation is walk-forward by match time so no target match ever contributes to its
+own fit. Teams never seen before a cutoff (promoted clubs, mid-season arrivals) are
+forecast with an explicit shrunk league-average prior instead of being dropped: their
+attack is the mean-centred league average (0.0) and their defence is the mean fitted
+defence multiplier, and every such forecast is flagged in its provenance.
 """
 
 from __future__ import annotations
 
 import math
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Sequence
 
 MAX_GOALS = 10
 _RHO_GRID = (-0.15, -0.10, -0.05, 0.0, 0.05, 0.10, 0.15)
+
+# Stable club identity across eras. Archive team IDs are reassigned between seasons,
+# so names are the join key; this table maps every known spelling to one canonical
+# slug. Unknown names pass through unchanged so newly promoted clubs keep working.
+CANONICAL_TEAM_ALIASES: dict[str, str] = {
+    "arsenal": "arsenal",
+    "aston villa": "aston-villa",
+    "bournemouth": "bournemouth",
+    "afc bournemouth": "bournemouth",
+    "brentford": "brentford",
+    "brighton": "brighton",
+    "brighton & hove albion": "brighton",
+    "brighton and hove albion": "brighton",
+    "burnley": "burnley",
+    "chelsea": "chelsea",
+    "coventry city": "coventry-city",
+    "crystal palace": "crystal-palace",
+    "everton": "everton",
+    "fulham": "fulham",
+    "hull city": "hull-city",
+    "ipswich": "ipswich-town",
+    "ipswich town": "ipswich-town",
+    "leeds": "leeds-united",
+    "leeds united": "leeds-united",
+    "leicester": "leicester-city",
+    "leicester city": "leicester-city",
+    "liverpool": "liverpool",
+    "luton": "luton-town",
+    "luton town": "luton-town",
+    "man city": "manchester-city",
+    "manchester city": "manchester-city",
+    "man utd": "manchester-united",
+    "man united": "manchester-united",
+    "manchester united": "manchester-united",
+    "newcastle": "newcastle-united",
+    "newcastle united": "newcastle-united",
+    "norwich": "norwich-city",
+    "norwich city": "norwich-city",
+    "nott'm forest": "nottingham-forest",
+    "nottm forest": "nottingham-forest",
+    "nottingham forest": "nottingham-forest",
+    "sheffield utd": "sheffield-united",
+    "sheffield united": "sheffield-united",
+    "southampton": "southampton",
+    "spurs": "tottenham-hotspur",
+    "tottenham": "tottenham-hotspur",
+    "tottenham hotspur": "tottenham-hotspur",
+    "sunderland": "sunderland",
+    "watford": "watford",
+    "west brom": "west-bromwich-albion",
+    "west bromwich albion": "west-bromwich-albion",
+    "west ham": "west-ham-united",
+    "west ham united": "west-ham-united",
+    "wolves": "wolverhampton-wanderers",
+    "wolverhampton wanderers": "wolverhampton-wanderers",
+}
+
+
+def canonical_team_name(name: str) -> str:
+    """Return the stable club slug for any known spelling; unknown names pass through."""
+    return CANONICAL_TEAM_ALIASES.get(name.strip().lower(), name.strip())
 
 
 @dataclass(frozen=True)
@@ -29,6 +99,7 @@ class Match:
     away_goals: int
     kickoff: str = ""
     weight: float = 1.0
+    event: int | None = None
 
     def __post_init__(self) -> None:
         if self.home == self.away:
@@ -67,6 +138,7 @@ class MatchPrediction:
     draw: float
     away_win: float
     most_likely_scores: tuple[tuple[str, float], ...]
+    priors_used: tuple[str, ...] = field(default=())
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -83,6 +155,7 @@ class MatchPrediction:
                 {"score": score, "probability": round(probability, 6)}
                 for score, probability in self.most_likely_scores
             ],
+            "priors_used": list(self.priors_used),
         }
 
 
@@ -150,12 +223,14 @@ def fit_team_ratings(
     log_likelihood = -math.inf
     iteration = 0
     for iteration in range(1, max_iterations + 1):
+        # Attack update: the stationarity condition of dL/da_i is
+        # G_i = sum_home w*exp(ha + a_i + d_j) + sum_away w*exp(a_i + d_h),
+        # so exp(home_advantage) belongs in the home-fixture exposure term.
         for team in teams:
             exposure = sum(
-                match.weight * math.exp(defence[match.away])
+                match.weight * math.exp(home_advantage + defence[match.away])
                 for match in home_matches_by_team[team]
             ) + sum(
-                # Playing away, our scoring rate faces the opponent's defence.
                 match.weight * math.exp(defence[match.home])
                 for match in away_matches_by_team[team]
             )
@@ -163,12 +238,15 @@ def fit_team_ratings(
         mean_attack = sum(attack.values()) / len(teams)
         for team in teams:
             attack[team] -= mean_attack
+        # Defence update: dL/dd_i sets C_i = sum_{i home} w*exp(a_j)
+        # + sum_{i away} w*exp(ha + a_j); the away term carries exp(ha) because the
+        # opponent's scoring rate there is lambda_home.
         for team in teams:
             exposure = sum(
                 match.weight * math.exp(attack[match.away])
                 for match in home_matches_by_team[team]
             ) + sum(
-                match.weight * math.exp(attack[match.home])
+                match.weight * math.exp(home_advantage + attack[match.home])
                 for match in away_matches_by_team[team]
             )
             defence[team] = math.log(conceded[team] + 1e-9) - math.log(exposure + 1e-12)
@@ -220,12 +298,54 @@ def fit_team_ratings(
     )
 
 
-def predict_match(ratings: TeamRatings, home: str, away: str) -> MatchPrediction:
-    """Score-grid outcome probabilities with the optional Dixon-Coles correction."""
-    if home not in ratings.attack or away not in ratings.attack:
-        raise ValueError(f"unfitted team: {home if home not in ratings.attack else away}")
+def predict_match(
+    ratings: TeamRatings,
+    home: str,
+    away: str,
+    *,
+    allow_prior: bool = True,
+) -> MatchPrediction:
+    """Score-grid outcome probabilities with the optional Dixon-Coles correction.
+
+    Teams absent from the fitted ratings are forecast with an explicit shrunk
+    league-average prior: average attack (0.0 under mean-centring) and the mean fitted
+    defence multiplier. Every substitution is recorded in ``priors_used`` so callers
+    can label promoted/unseen-team forecasts as approximate.
+    """
     if home == away:
         raise ValueError("home and away team must differ")
+    known_home = home in ratings.attack
+    known_away = away in ratings.attack
+    if not known_home and not allow_prior:
+        raise ValueError(f"unfitted team: {home}")
+    if not known_away and not allow_prior:
+        raise ValueError(f"unfitted team: {away}")
+    priors_used: tuple[str, ...] = ()
+    if not (known_home and known_away):
+        flags: list[str] = []
+        mean_defence = (
+            sum(ratings.defence.values()) / len(ratings.defence) if ratings.defence else 0.0
+        )
+        if not known_home:
+            flags.append(home)
+        if not known_away:
+            flags.append(away)
+        priors_used = tuple(flags)
+        attack = dict(ratings.attack)
+        defence = dict(ratings.defence)
+        attack.setdefault(home, 0.0)
+        attack.setdefault(away, 0.0)
+        defence.setdefault(home, mean_defence)
+        defence.setdefault(away, mean_defence)
+        ratings = TeamRatings(
+            attack=attack,
+            defence=defence,
+            home_advantage=ratings.home_advantage,
+            rho=ratings.rho,
+            fitted_matches=ratings.fitted_matches,
+            iterations=ratings.iterations,
+            log_likelihood=ratings.log_likelihood,
+        )
     lam_home = ratings.lambda_home(home, away)
     lam_away = ratings.lambda_away(home, away)
     rho = ratings.rho or 0.0
@@ -253,6 +373,7 @@ def predict_match(ratings: TeamRatings, home: str, away: str) -> MatchPrediction
         draw=draw,
         away_win=away_win,
         most_likely_scores=tuple((f"{hg}-{ag}", mass) for (hg, ag), mass in top_scores),
+        priors_used=priors_used,
     )
 
 
@@ -310,7 +431,7 @@ def walk_forward_backtest(
         summary["evaluated"] = count
         return summary
 
-    pending: list[tuple[tuple[float, float, float], Match]] = []
+    pending: list[tuple[tuple[float, float, float], Match, tuple[str, ...]]] = []
     for index, match in enumerate(ordered):
         if index < minimum_train:
             continue
@@ -330,16 +451,19 @@ def walk_forward_backtest(
                     counts[2] += 1
             base_rates = tuple(count / len(history) for count in counts)
             since_refresh = 0
-        # A team never seen before the cutoff (e.g. a promoted club) has no ratings;
-        # skip rather than crash, mirroring production behaviour.
-        if match.home not in ratings.attack or match.away not in ratings.attack:
-            continue
         prediction = predict_match(ratings, match.home, match.away)
-        pending.append(((prediction.home_win, prediction.draw, prediction.away_win), match))
+        pending.append(
+            (
+                (prediction.home_win, prediction.draw, prediction.away_win),
+                match,
+                prediction.priors_used,
+            )
+        )
         results["predictions"].append(
             {
                 **prediction.to_dict(),
                 "kickoff": match.kickoff,
+                "event": match.event,
                 "actual_score": f"{match.home_goals}-{match.away_goals}",
             }
         )
@@ -347,8 +471,52 @@ def walk_forward_backtest(
 
     if not pending:
         raise ValueError("no evaluated matches; increase sample or lower minimum_train")
-    results["summary"] = metrics(pending)
+    plain_rows = [(probs, match) for probs, match, _ in pending]
+    results["summary"] = metrics(plain_rows)
+    results["skipped"] = 0
+    prior_rows = [(probs, match) for probs, match, priors in pending if priors]
+    results["prior_backed_predictions"] = len(prior_rows)
+    results["prior_backed_teams"] = sorted(
+        {team for _, _, priors in pending for team in priors}
+    )
+    if prior_rows:
+        results["summary_prior_backed"] = metrics(prior_rows)
+    fitted_rows = [(probs, match) for probs, match, priors in pending if not priors]
+    if fitted_rows:
+        results["summary_fitted_teams_only"] = metrics(fitted_rows)
+    early = [
+        (probs, match)
+        for probs, match in plain_rows
+        if match.event is not None and match.event <= 6
+    ]
+    late = [
+        (probs, match)
+        for probs, match in plain_rows
+        if match.event is None or (match.event is not None and match.event > 6)
+    ]
+    if early:
+        results["summary_early_events_le6"] = metrics(early)
+    if late:
+        results["summary_late_events_gt6"] = metrics(late)
+
+    # Reliability of the home-win probability in deciles.
+    calibration: list[dict[str, float]] = []
+    ordered_by_prob = sorted(plain_rows, key=lambda row: row[0][0])
+    bucket = max(1, len(ordered_by_prob) // 10)
+    for start in range(0, len(ordered_by_prob), bucket):
+        chunk = ordered_by_prob[start : start + bucket]
+        mean_p = sum(row[0][0] for row in chunk) / len(chunk)
+        rate = sum(
+            1.0 for _, match in chunk if match.home_goals > match.away_goals
+        ) / len(chunk)
+        calibration.append(
+            {
+                "n": len(chunk),
+                "mean_home_win_probability": round(mean_p, 4),
+                "empirical_home_win_rate": round(rate, 4),
+            }
+        )
+    results["home_win_calibration_deciles"] = calibration
     results["rho"] = ratings.rho if ratings else None
-    results["refreshes"] = len(ordered) - minimum_train
     return results
 

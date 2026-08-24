@@ -2,6 +2,50 @@
 
 Research was refreshed on 2026-08-23 and favored primary/official sources.
 
+## Team-model correctness audit (2026-08-24, supersedes v0.1 numbers)
+
+A focused audit of `team_model` found and fixed real defects before any tuning:
+
+1. **Fitting equations were wrong.** Derivation plus a numerical-gradient probe showed
+   max |dL/dparam| ~ 53 at the returned solution: exp(home_advantage) was missing from
+   the attack exposure of home fixtures and the defence exposure of away fixtures.
+   Both coordinate updates now implement the exact stationarity conditions; tests add
+   finite-difference gradient checks (~0 at optimum), monotone likelihood across
+   sweeps, and lambda recovery from simulated known parameters (<10% mean error).
+2. **Training data was silently incomplete.** 2019/20 contains 92 genuine finished
+   fixtures stored with event values beyond 38 (COVID rescheduling); the old loader's
+   `event <= 38` filter dropped them, producing 2,188 instead of 2,280 training
+   matches. The loader now accepts finished matches regardless of event number,
+   deduplicates on (home, away, kickoff), and emits a per-season acceptance audit.
+   Corrected training count: 2,280/2,280 with zero unexplained rejections.
+3. **Promoted/unseen teams vanished from evaluation** (7 of 380 holdout matches).
+   Forecasts for unseen teams now use an explicit shrunk league-average prior
+   (mean-centred attack 0.0, mean fitted defence), flagged per prediction via
+   `priors_used`. All 380 holdout matches are now evaluated, including GW1.
+4. **Club identity** is name-based because archive team IDs are reassigned between
+   seasons; a tested canonical alias table (`CANONICAL_TEAM_ALIASES`) collapses known
+   spellings ("Man City"/"Manchester City", "Spurs", "Nott'm Forest", ...). Within the
+   loaded 2019/20-2025/26 window names proved already consistent; the table protects
+   future recovery of earlier eras.
+
+Corrected frozen baseline (untouched 2025/26 holdout, refresh every 60):
+
+| Slice | n | Log loss | Brier | Accuracy |
+|---|---|---|---|---|
+| All matches | 380 | **1.0396** | **0.6251** | **46.6%** |
+| Prior-backed (unseen-team) only | 6 | 1.139 | 0.696 | 16.7% |
+| Events <= 6 (early season) | 60 | 1.031 | 0.615 | 45.0% |
+| Events > 6 | 320 | 1.041 | 0.627 | 46.9% |
+| Train-rate baseline | 380 | 1.0837 | 0.6557 | 42.6% |
+| Uniform baseline | 380 | 1.0986 | 0.6667 | 42.6% |
+
+The previous headline result survives and slightly improves despite adding the seven
+hardest matches. Honest weakness: the six prior-backed Sunderland forecasts underperformed
+even uniform (n too small to conclude); a mildly pessimistic promoted-team prior is the
+next candidate experiment, after this corrected baseline is frozen. Dixon-Coles selected
+rho = -0.05; fitted home advantage ~ +17% goals. Artifact:
+`reports/team_strength_backtest.json`.
+
 ## Team strength / match probability module v0.1 (2026-08-24)
 
 New standalone `fplengine.team_model`: Maher-style weighted Poisson attack/defence

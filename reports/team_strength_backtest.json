@@ -1,149 +1,310 @@
 {
-  "dixon_coles_rho": 0.0,
+  "dixon_coles_rho": -0.05,
   "example_predictions": [
     {
-      "away": "Wolves",
-      "expected_away_goals": 0.7494,
-      "expected_home_goals": 2.4896,
-      "home": "Man City",
+      "away": "wolverhampton-wanderers",
+      "expected_away_goals": 0.6753,
+      "expected_home_goals": 2.4988,
+      "home": "manchester-city",
       "most_likely_scores": [
         {
-          "probability": 0.121506,
+          "probability": 0.130607,
           "score": "2-0"
         },
         {
-          "probability": 0.100833,
+          "probability": 0.108788,
           "score": "3-0"
         },
         {
-          "probability": 0.097613,
+          "probability": 0.104534,
           "score": "1-0"
         },
         {
-          "probability": 0.091051,
+          "probability": 0.088198,
           "score": "2-1"
         },
         {
-          "probability": 0.075559,
+          "probability": 0.073464,
           "score": "3-1"
         }
       ],
+      "priors_used": [],
       "probabilities": {
-        "away_win": 0.091586,
-        "draw": 0.15443,
-        "home_win": 0.753984
+        "away_win": 0.079784,
+        "draw": 0.148419,
+        "home_win": 0.771798
       }
     },
     {
-      "away": "Man City",
-      "expected_away_goals": 2.3129,
-      "expected_home_goals": 0.8066,
-      "home": "Wolves",
+      "away": "manchester-city",
+      "expected_away_goals": 2.1351,
+      "expected_home_goals": 0.7903,
+      "home": "wolverhampton-wanderers",
       "most_likely_scores": [
         {
-          "probability": 0.118175,
+          "probability": 0.122268,
           "score": "0-2"
         },
         {
-          "probability": 0.102186,
+          "probability": 0.114531,
           "score": "0-1"
         },
         {
-          "probability": 0.095317,
+          "probability": 0.096633,
           "score": "1-2"
         },
         {
-          "probability": 0.09111,
-          "score": "0-3"
+          "probability": 0.090518,
+          "score": "1-1"
         },
         {
-          "probability": 0.08242,
-          "score": "1-1"
+          "probability": 0.087019,
+          "score": "0-3"
         }
       ],
+      "priors_used": [],
       "probabilities": {
-        "away_win": 0.711989,
-        "draw": 0.174011,
-        "home_win": 0.114
+        "away_win": 0.683477,
+        "draw": 0.190314,
+        "home_win": 0.126209
       }
     }
   ],
-  "experiment": "team-strength-walk-forward-v0.1",
+  "experiment": "team-strength-walk-forward-v0.1-corrected",
   "final_fit_best_defence": [
     [
-      "Man City",
-      -0.15597040433688303
+      "manchester-city",
+      -0.26217485407090635
     ],
     [
-      "Liverpool",
-      -0.07676673033515513
+      "liverpool",
+      -0.15033369438855182
     ],
     [
-      "Arsenal",
-      -0.036075670490623324
+      "arsenal",
+      -0.1154568131538003
     ],
     [
-      "Chelsea",
-      0.08031727147678325
+      "chelsea",
+      0.014395815714848048
     ],
     [
-      "Man Utd",
-      0.1661377527688357
+      "manchester-united",
+      0.0665614154219698
     ],
     [
-      "Crystal Palace",
-      0.21361604845887694
+      "crystal-palace",
+      0.14477189675891555
     ]
   ],
   "final_fit_top_attack": [
     [
-      "Man City",
-      0.5716419982365102
+      "manchester-city",
+      0.5936481059645976
     ],
     [
-      "Liverpool",
-      0.489657130402761
+      "liverpool",
+      0.497503911914604
     ],
     [
-      "Arsenal",
-      0.33932835056230654
+      "arsenal",
+      0.33654790366964943
     ],
     [
-      "Spurs",
-      0.3176940811469448
+      "tottenham-hotspur",
+      0.31549509406637694
     ],
     [
-      "Chelsea",
-      0.23512658003979434
+      "chelsea",
+      0.24709118628419593
     ],
     [
-      "Newcastle",
-      0.1618188093855439
+      "manchester-united",
+      0.17616223815634827
     ]
   ],
   "holdout_matches": 380,
   "holdout_season": "2025-26",
-  "home_advantage": 0.07358967068556765,
+  "home_advantage": 0.1573056279304943,
+  "home_win_calibration_deciles": [
+    {
+      "empirical_home_win_rate": 0.2632,
+      "mean_home_win_probability": 0.1738,
+      "n": 38
+    },
+    {
+      "empirical_home_win_rate": 0.2632,
+      "mean_home_win_probability": 0.2711,
+      "n": 38
+    },
+    {
+      "empirical_home_win_rate": 0.2368,
+      "mean_home_win_probability": 0.3251,
+      "n": 38
+    },
+    {
+      "empirical_home_win_rate": 0.4474,
+      "mean_home_win_probability": 0.36,
+      "n": 38
+    },
+    {
+      "empirical_home_win_rate": 0.3684,
+      "mean_home_win_probability": 0.3976,
+      "n": 38
+    },
+    {
+      "empirical_home_win_rate": 0.3421,
+      "mean_home_win_probability": 0.4352,
+      "n": 38
+    },
+    {
+      "empirical_home_win_rate": 0.5789,
+      "mean_home_win_probability": 0.4763,
+      "n": 38
+    },
+    {
+      "empirical_home_win_rate": 0.5789,
+      "mean_home_win_probability": 0.5219,
+      "n": 38
+    },
+    {
+      "empirical_home_win_rate": 0.4737,
+      "mean_home_win_probability": 0.585,
+      "n": 38
+    },
+    {
+      "empirical_home_win_rate": 0.7105,
+      "mean_home_win_probability": 0.7161,
+      "n": 38
+    }
+  ],
+  "prior_backed_predictions": 6,
+  "prior_backed_teams": [
+    "sunderland"
+  ],
   "provenance": {
     "archive_commit": "c2add969e11ec19002a091f8aa60164c9a255854",
+    "identity": "canonical slugs via fplengine.team_model.CANONICAL_TEAM_ALIASES",
     "note": "Underlying data owned by FPL/Understat per archive licence; research use only",
     "repository": "https://github.com/vaastav/Fantasy-Premier-League",
     "source": "Vaastav Fantasy-Premier-League archive fixtures.csv"
   },
   "refresh_every": 60,
+  "season_audit": {
+    "holdout": {
+      "accepted": 380,
+      "accepted_outside_events_1_38": 0,
+      "reasons": {},
+      "rejected": 0,
+      "rows_present": 380
+    },
+    "train": {
+      "2019-20": {
+        "accepted": 380,
+        "accepted_outside_events_1_38": 92,
+        "reasons": {},
+        "rejected": 0,
+        "rows_present": 380
+      },
+      "2020-21": {
+        "accepted": 380,
+        "accepted_outside_events_1_38": 0,
+        "reasons": {},
+        "rejected": 0,
+        "rows_present": 380
+      },
+      "2021-22": {
+        "accepted": 380,
+        "accepted_outside_events_1_38": 0,
+        "reasons": {},
+        "rejected": 0,
+        "rows_present": 380
+      },
+      "2022-23": {
+        "accepted": 380,
+        "accepted_outside_events_1_38": 0,
+        "reasons": {},
+        "rejected": 0,
+        "rows_present": 380
+      },
+      "2023-24": {
+        "accepted": 380,
+        "accepted_outside_events_1_38": 0,
+        "reasons": {},
+        "rejected": 0,
+        "rows_present": 380
+      },
+      "2024-25": {
+        "accepted": 380,
+        "accepted_outside_events_1_38": 0,
+        "reasons": {},
+        "rejected": 0,
+        "rows_present": 380
+      }
+    }
+  },
+  "skipped": 0,
   "summary": {
-    "evaluated": 373,
-    "model_accuracy": 0.455764,
-    "model_brier": 0.626809,
-    "model_log_loss": 1.04207,
-    "train_rates_accuracy": 0.423592,
-    "train_rates_brier": 0.656192,
-    "train_rates_log_loss": 1.084177,
-    "uniform_accuracy": 0.423592,
+    "evaluated": 380,
+    "model_accuracy": 0.465789,
+    "model_brier": 0.62514,
+    "model_log_loss": 1.039613,
+    "train_rates_accuracy": 0.426316,
+    "train_rates_brier": 0.655746,
+    "train_rates_log_loss": 1.083653,
+    "uniform_accuracy": 0.426316,
     "uniform_brier": 0.666667,
     "uniform_log_loss": 1.098612
   },
-  "train_matches": 2188,
+  "summary_early_events_le6": {
+    "evaluated": 60,
+    "model_accuracy": 0.45,
+    "model_brier": 0.615057,
+    "model_log_loss": 1.031094,
+    "train_rates_accuracy": 0.45,
+    "train_rates_brier": 0.652668,
+    "train_rates_log_loss": 1.080447,
+    "uniform_accuracy": 0.45,
+    "uniform_brier": 0.666667,
+    "uniform_log_loss": 1.098612
+  },
+  "summary_fitted_teams_only": {
+    "evaluated": 374,
+    "model_accuracy": 0.470588,
+    "model_brier": 0.624011,
+    "model_log_loss": 1.038013,
+    "train_rates_accuracy": 0.425134,
+    "train_rates_brier": 0.65581,
+    "train_rates_log_loss": 1.083654,
+    "uniform_accuracy": 0.425134,
+    "uniform_brier": 0.666667,
+    "uniform_log_loss": 1.098612
+  },
+  "summary_late_events_gt6": {
+    "evaluated": 320,
+    "model_accuracy": 0.46875,
+    "model_brier": 0.62703,
+    "model_log_loss": 1.041211,
+    "train_rates_accuracy": 0.421875,
+    "train_rates_brier": 0.656323,
+    "train_rates_log_loss": 1.084255,
+    "uniform_accuracy": 0.421875,
+    "uniform_brier": 0.666667,
+    "uniform_log_loss": 1.098612
+  },
+  "summary_prior_backed": {
+    "evaluated": 6,
+    "model_accuracy": 0.166667,
+    "model_brier": 0.695506,
+    "model_log_loss": 1.13934,
+    "train_rates_accuracy": 0.5,
+    "train_rates_brier": 0.651759,
+    "train_rates_log_loss": 1.08364,
+    "uniform_accuracy": 0.5,
+    "uniform_brier": 0.666667,
+    "uniform_log_loss": 1.098612
+  },
+  "train_matches": 2280,
   "train_seasons": [
     "2019-20",
     "2020-21",
