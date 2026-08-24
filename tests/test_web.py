@@ -118,12 +118,22 @@ class PersistedDataPathTests(unittest.TestCase):
         result = build_persisted_cockpit(self.store)
         self.assertIsNotNone(result)
         payload, _snapshot, predictions = result
-        live_by_id = {row.player_id: row.expected_points for row in self.predictions}
-        served = {row["player_id"]: row["expected_points"] for row in payload["rankings"]}
-        for player_id, expected in live_by_id.items():
-            self.assertAlmostEqual(served[player_id], round(expected, 2), places=2)
+        live = {row.player_id: row for row in self.predictions}
+        served = {row["player_id"]: row for row in payload["rankings"]}
+        for player_id, expected in live.items():
+            self.assertAlmostEqual(
+                served[player_id]["expected_points"],
+                round(expected.expected_points, 2),
+                places=2,
+            )
+            # Persisted transfer counters must reach the Market tab unchanged.
+            self.assertEqual(
+                served[player_id]["market_net_transfers"],
+                expected.market_net_transfers,
+            )
         self.assertIn("persisted run", payload["data_source"])
-        self.assertEqual(len(predictions), len(live_by_id))
+        self.assertEqual(len(predictions), len(live))
+        self.assertTrue(any(row["market_net_transfers"] != 0 for row in served.values()))
 
     def test_persisted_run_records_league_scale_and_confidence(self) -> None:
         run = self.store.latest_predictions()

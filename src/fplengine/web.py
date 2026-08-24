@@ -366,7 +366,9 @@ def build_persisted_cockpit(
         position_id = int(element.get("element_type") or 1)
         price = int(element.get("now_cost") or 0) / 10.0
         ownership = float(element.get("selected_by_percent") or 0.0)
-        net_transfers = 0
+        net_transfers = int(element.get("transfers_in_event") or 0) - int(
+            element.get("transfers_out_event") or 0
+        )
         expected_points = float(row["expected_points"])
         selected_count = (
             max(1000.0, total_players * ownership / 100.0) if total_players else 1000.0

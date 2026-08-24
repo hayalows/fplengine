@@ -442,7 +442,8 @@ class Store:
             cursor.execute(
                 self._sql(
                     f"""SELECT s.player_id, s.captured_at, s.now_cost, s.selected_percent,
-                    s.status, s.chance_next, s.news, p.fpl_code, p.web_name, p.first_name,
+                    s.status, s.chance_next, s.news, s.transfers_in_event,
+                    s.transfers_out_event, p.fpl_code, p.web_name, p.first_name,
                     p.second_name, p.position_id, p.team_id
                     FROM {snapshots} s JOIN {players} p ON p.fpl_id = s.player_id
                     WHERE s.ingestion_run_id=?"""
@@ -465,6 +466,8 @@ class Store:
                         int(row["chance_next"]) if row["chance_next"] is not None else None
                     ),
                     "news": row["news"] or "",
+                    "transfers_in_event": int(row["transfers_in_event"]),
+                    "transfers_out_event": int(row["transfers_out_event"]),
                     "can_select": True,
                     "removed": False,
                     "captured_at": self._iso(row["captured_at"]),
