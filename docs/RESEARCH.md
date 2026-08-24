@@ -2,6 +2,44 @@
 
 Research was refreshed on 2026-08-23 and favored primary/official sources.
 
+## Split transition role decay (PR #18, 2026-08-24)
+
+Grid over club-change role-retention weight {0, 0.25, 0.5, 0.75, 1.0} x promoted-team
+weight {0, 0.5, 1.0}, composed multiplicatively so both axes stay identifiable
+(`reports/split_transition_2025_26.json`). Held-out target 2025/26 GW1-10; priors
+role=1 / attack=3 / ancillary=3 seasons from the Vaastav archive commit `c2add96`.
+No production model changed.
+
+Pre-season cohorts: 479 same-club, 37 established transfers, 22 transfers into promoted
+clubs, 62 new to FPL, 64 promoted-club signings with no FPL history, 26 returning
+promoted-club veterans with no current role evidence.
+
+Development-season results:
+
+- Established transfers improve monotonically under decay in every phase:
+  minutes MAE 24.25 -> 19.78 (-18%), points MAE 1.48 -> 1.27, minutes bias +6.09 ->
+  -0.36, interval coverage 0.830 -> 0.865, within-cohort NDCG up.
+- Transfers into promoted clubs prefer partial decay (minutes MAE optimum ~12-25%
+  retention: 24.44 -> 22.34) but samples are small (220 player-GWs).
+- Global starter NDCG@10 falls monotonically with decay (0.4268 -> 0.4110) and top-10
+  actual returns drop 5.28 -> 5.02; starter points MAE is flat (~2.317).
+- The earlier "promotion context is insensitive" reading was partly structural: most
+  promoted-club players carry no historical role evidence at all, so no weight can
+  affect them.
+
+Directional replication on untouched 2024/25 (priors <= 2023/24, GW1-10): the
+established-transfer mechanism replicates exactly (minutes MAE 18.84 -> 16.57,
+points MAE 1.03 -> 0.89), but the *global* ranking effect flips sign (NDCG 0.440 ->
+0.458 improved with decay). One season of ~37 transfers is too small for global
+top-10 conclusions either way.
+
+Decision: xp-v0.3.0 promotion REJECTED again. No grid point achieved a Pareto win on
+the development season, and post-hoc use of the confirmation season would break the
+dev/confirm split. Durable learning: old-club role evidence systematically overpredicts
+transfer minutes (+6 bias) and this replicates across seasons while global ranking
+effects do not. Next experiment: widen transfer uncertainty/risk without moving mean
+xP, which can improve calibration coverage without reordering the top of the ranking.
+
 ## v0.2 evidence decision
 
 The live 2026/27 bootstrap returned zero in every legacy attack/defence strength field.
