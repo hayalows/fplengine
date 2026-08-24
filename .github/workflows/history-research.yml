@@ -12,12 +12,20 @@ on:
       - "tests/test_history.py"
       - "tests/test_model_v3.py"
       - ".github/workflows/history-research.yml"
+  pull_request:
+    paths:
+      - "src/fplengine/history.py"
+      - "src/fplengine/model_v3.py"
+      - "src/fplengine/history_experiment.py"
+      - "tests/test_history.py"
+      - "tests/test_model_v3.py"
+      - ".github/workflows/history-research.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: fplengine-v0-3-history-research
+  group: fplengine-v0-3-history-research-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
