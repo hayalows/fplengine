@@ -12,8 +12,8 @@ class VercelAdapterTests(unittest.TestCase):
     def test_site_path_is_resolved(self) -> None:
         self.assertEqual(_requested_tab('/site/captain'), 'captain')
 
-    def test_unknown_tab_falls_back_to_my_team(self) -> None:
-        self.assertEqual(_requested_tab('/site/not-a-tab'), 'myteam')
+    def test_unknown_tab_falls_back_to_home(self) -> None:
+        self.assertEqual(_requested_tab('/site/not-a-tab'), 'home')
 
 
 if __name__ == '__main__':

@@ -9,8 +9,8 @@
     }
   },
   "rewrites": [
-    { "source": "/", "destination": "/api/index?tab=myteam" },
-    { "source": "/site", "destination": "/api/index?tab=myteam" },
+    { "source": "/", "destination": "/api/index?tab=home" },
+    { "source": "/site", "destination": "/api/index?tab=home" },
     { "source": "/site/:tab", "destination": "/api/index?tab=:tab" }
   ]
 }

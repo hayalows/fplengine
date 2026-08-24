@@ -75,7 +75,7 @@ def _requested_tab(path: str) -> str:
         candidate = parsed.path.removeprefix("/site/").split("/", 1)[0]
         if candidate in _VALID_TABS:
             return candidate
-    return "myteam"
+    return "home"
 
 
 def _normalize_persisted_types(payload: dict[str, Any]) -> None:

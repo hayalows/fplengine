@@ -25,302 +25,23 @@ from urllib.parse import urlparse
 from .api_client import FPLClient, Snapshot
 from .cockpit import assemble_cockpit, build_cockpit, build_personal_sections
 from .model import POSITION_NAMES, Prediction
+from . import webui
+from .market import build_market_view
 from .storage import Store
 
-TABS = (
-    ("myteam", "My Team"),
-    ("picks", "Top Picks"),
-    ("captain", "Captain"),
-    ("transfers", "Transfers"),
-    ("players", "Players"),
-    ("fixtures", "Fixtures"),
-    ("market", "Market"),
-    ("changes", "What Changed"),
-    ("model", "Model / Why"),
-    ("premier", "Premier League"),
-)
-
-_STYLE = """<!doctype html><html lang=en><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
-<title>FPL Engine</title><style>
-body{font-family:system-ui,sans-serif;margin:0;background:#101418;color:#e8eaed}
-nav{display:flex;flex-wrap:wrap;gap:.25rem;padding:.5rem;background:#171c22}
-nav a{padding:.45rem .7rem;border-radius:6px;color:#cfd6dd;text-decoration:none;font-size:.9rem}
-nav a.active,nav a:hover{background:#2a3440;color:#fff}
-main{max-width:60rem;margin:0 auto;padding:1rem}
-table{width:100%;border-collapse:collapse;font-size:.85rem}
-th,td{text-align:left;padding:.35rem .45rem;border-bottom:1px solid #232b33;white-space:nowrap}
-tr:nth-child(even){background:#141a20}
-.tag{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.72rem;
-background:#31404f;margin-right:.3rem}
-.warn{color:#ffcc66}.ok{color:#7bd88f}.bad{color:#ff8080}
-h2{margin:1rem 0 .5rem;font-size:1.05rem}h1{font-size:1.2rem}
-.src{color:#8b98a5;font-size:.78rem}</style></head><body>"""
-
-
-def _table(headers: list[str], rows: list[list[str]], classes: list[str] | None = None) -> str:
-    head = "".join(f"<th>{escape(h)}</th>" for h in headers)
-    body = []
-    for row in rows:
-        cells = []
-        for index, value in enumerate(row):
-            css = f' class="{classes[index]}"' if classes and classes[index] else ""
-            cells.append(f"<td{css}>{value}</td>")
-        body.append("<tr>" + "".join(cells) + "</tr>")
-    return f"<table><thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table>"
-
-
-def _fixture_label(row: dict[str, Any]) -> str:
-    return "/".join(f"{item['venue']}{escape(str(item['opponent']))}" for item in row.get("fixture", [])) or "-"
-
-
-def _availability(row: dict[str, Any]) -> str:
-    status = row.get("availability_status", "a")
-    if status == "a":
-        return '<span class="ok">available</span>'
-    news = escape(str(row.get("availability_news", "")))[:40]
-    return f'<span class="bad">{escape(status)}</span> {news}'
-
-
-def render_tab(tab: str, payload: dict[str, Any]) -> str:
-    meta = payload["metadata"]
-    parts = [
-        "<main>",
-        "<h1>"
-        f"GW{meta['target_event']} &middot; {escape(meta['model_version'])}"
-        f"</h1><div class=src>as of {escape(meta['data_as_of'])} &middot; "
-        f"deadline {escape(meta.get('deadline_utc') or '-')} &middot; "
-        f"source {escape(payload.get('data_source', 'live'))}</div>",
-    ]
-    for warning in payload["warnings"]:
-        parts.append(f'<div class="warn">{escape(warning)}</div>')
-
-    if tab == "myteam":
-        team = payload.get("my_team") or {}
-        if "error" in team:
-            parts.append(f"<h2>My Team</h2><div class=warn>{escape(team['error'])}</div>")
-        else:
-            rows = [
-                [
-                    str(row["position_slot"]),
-                    f"{escape(str(row['name']))}{' (C)' if row['is_captain'] else ' (V)' if row['is_vice_captain'] else ''}",
-                    _fixture_label(row),
-                    f"{row.get('expected_points', 0):.1f}",
-                    f"{row.get('expected_minutes', 0):.0f}",
-                    f"{row.get('risk', 0):.2f}",
-                    f"&pound;{row.get('price', 0):.1f}",
-                    _availability(row),
-                ]
-                for row in team.get("players", [])
-            ]
-            parts.append("<h2>My Team</h2>")
-            parts.append(_table(
-                ["#", "Player", "Fixture", "xP", "xMins", "Risk", "Price", "Availability"],
-                rows,
-                classes=[None, None, None, None, None, None, None, None],
-            ))
-            state = payload.get("manager_state", {})
-            if state:
-                chips = "".join(
-                    f"<span class=tag>{escape(name)}: {escape(str(state[name]['classification']))}</span>"
-                    for name in state
-                )
-                parts.append(f"<p>{chips}</p>")
-    elif tab == "picks":
-        rows = [
-            [
-                str(row["rank"]),
-                escape(row["player_name"]),
-                row["team"],
-                row["position"],
-                f"&pound;{row['price']:.1f}",
-                f"{row['expected_minutes']:.0f}",
-                f"<b>{row['expected_points']:.2f}</b>",
-                f"{row['risk']:.2f}",
-                f"{row['ownership_percent']:.1f}%",
-                escape(", ".join(f"{k} {v:+.1f}" for k, v in row["why_top_components"].items())),
-            ]
-            for row in payload["rankings"]
-        ]
-        parts.append("<h2>Top picks</h2>")
-        parts.append(_table(
-            ["#", "Player", "Team", "Pos", "Price", "xMins", "xP", "Risk", "Own%", "Why"],
-            rows,
-        ))
-    elif tab == "captain":
-        rows = [
-            [
-                escape(row["name"]),
-                f"{row['expected_points']:.2f}",
-                f"{row['ceiling_upper_bound']:.1f}",
-                f"{row['risk']:.2f}",
-                f"{row['ownership_percent']:.1f}%",
-            ]
-            for row in payload["captains"]
-        ]
-        parts.append("<h2>Captain candidates (ceiling)</h2>")
-        parts.append(_table(["Player", "xP", "Ceiling", "Risk", "Own%"], rows))
-    elif tab == "transfers":
-        next_gw = payload.get("next_gw") or {}
-        benchmark = payload.get("benchmark_squad") or {}
-        if benchmark.get("lineups"):
-            lineup = benchmark["lineups"][0]
-            parts.append(
-                f"<h2>Benchmark XI</h2><p>captain <b>{escape(lineup['captain']['name'])}</b>, "
-                f"projected {lineup['projected_points']}, cost {benchmark.get('squad_cost')}</p>"
-            )
-        if "recommendation" in next_gw:
-            rec = next_gw["recommendation"]
-            plan = rec["recommended_plan"]
-            label = rec["state_label"]
-            colour = "ok" if rec["action"] == "ROLL" or label == "VERIFIED_INPUTS" else "warn"
-            parts.append(
-                f"<h2>Roll vs transfers</h2>"
-                + _table(
-                    ["Plan", "Transfers", "Hits", "Projected", "Gain vs roll"],
-                    [
-                        [
-                            "ROLL" + (" *" if rec["action"] == "ROLL" else ""),
-                            "0",
-                            "0",
-                            f"{next_gw['roll_plan']['projected_points']:.1f}",
-                            "-",
-                        ],
-                        [
-                            "ONE" + (" *" if rec["action"] == "TRANSFER (one)" else ""),
-                            escape(", ".join(next_gw["best_single_transfer"]["transfers_in"]) or "-")
-                            + " / "
-                            + escape(", ".join(next_gw["best_single_transfer"]["transfers_out"]) or "-"),
-                            str(next_gw["best_single_transfer"]["hit_cost"]),
-                            f"{next_gw['best_single_transfer']['projected_points']:.1f}",
-                            f"<b>{rec['gain_single_over_roll']:+.2f}</b>",
-                        ],
-                        [
-                            "TWO" + (" *" if rec["action"] == "TRANSFER (two)" else ""),
-                            escape(", ".join(next_gw["best_two_transfer"]["transfers_in"]) or "-")
-                            + " / "
-                            + escape(", ".join(next_gw["best_two_transfer"]["transfers_out"]) or "-"),
-                            str(next_gw["best_two_transfer"]["hit_cost"]),
-                            f"{next_gw['best_two_transfer']['projected_points']:.1f}",
-                            f"<b>{rec['gain_double_over_roll']:+.2f}</b>",
-                        ],
-                    ],
-                    classes=[None, None, None, None, None],
-                )
-            )
-            parts.append(
-                f"<h2>Transfer plan</h2><p class={colour}><b>{escape(rec['action'])}</b> "
-                f"[{escape(label)}] - {escape(rec['reason'])}</p>"
-                f"<p>IN {escape(', '.join(plan['transfers_in']) or '-')}; "
-                f"OUT {escape(', '.join(plan['transfers_out']) or '-')}; "
-                f"hits {plan['hit_cost']}; projected {plan['projected_points']}; "
-                f"captain {escape(plan['captain'] or '')}</p>"
-                f"<p class=src>bench order: {escape(', '.join(plan['bench_order']))}</p>"
-            )
-        elif "skipped" in payload.get("your_transfers", {}):
-            parts.append(
-                "<h2>Transfer plan</h2><p>Provide squad/bank state via CLI flags for a personal plan.</p>"
-            )
-    elif tab == "players":
-        rows = [
-            [
-                str(index + 1),
-                escape(row["player_name"]),
-                row["team"],
-                row["position"],
-                f"{row['expected_minutes']:.0f}",
-                f"{row['expected_points']:.2f}",
-                f"[{row['lower_bound']:.1f}, {row['upper_bound']:.1f}]",
-            ]
-            for index, row in enumerate(payload.get("rankings", []))
-        ]
-        parts.append("<h2>Players (top of stored ranking)</h2>")
-        parts.append(_table(["#", "Player", "Team", "Pos", "xMins", "xP", "Range"], rows))
-    elif tab == "fixtures":
-        rows = []
-        for fixture in payload["fixtures"]:
-            if fixture.get("note"):
-                rows.append(["blank", ", ".join(escape(t) for t in fixture["teams"]), "", ""])
-                continue
-            score = f"{fixture['home_score']}-{fixture['away_score']}" if fixture["finished"] else ""
-            rows.append([
-                escape(fixture["home"]), escape(fixture["away"]), score,
-                "FT" if fixture["finished"] else "upcoming",
-            ])
-        parts.append("<h2>Fixtures</h2>")
-        parts.append(_table(["Home", "Away", "Score", "State"], rows))
-    elif tab == "market":
-        movers = payload["market_movers"]
-        bought = "".join(
-            f"<li>{escape(r['name'])} (+{r['net_transfers']}) xP {r['expected_points']}</li>"
-            for r in movers["most_bought"]
-        )
-        sold = "".join(
-            f"<li>{escape(r['name'])} ({r['net_transfers']}) xP {r['expected_points']}</li>"
-            for r in movers["most_sold"]
-        )
-        parts.append(f"<h2>Most bought</h2><ul>{bought}</ul><h2>Most sold</h2><ul>{sold}</ul>")
-    elif tab == "changes":
-        changes = payload.get("changes_since_previous_snapshot", {})
-        if changes.get("available"):
-            rows = [
-                [escape(row["name"]), f"+{row['price_change']:.1f}" if row["price_change"] > 0 else f"{row['price_change']:.1f}", f"{row['ownership_change_pp']:+.1f}pp", escape(row["news"][:50])]
-                for row in changes["price_moves"] + changes["availability_or_news_changes"]
-            ][:20]
-            parts.append(
-                f"<h2>What changed since {escape(changes['previous_captured_at'])}</h2>"
-            )
-            parts.append(_table(["Player", "&Delta;Price", "&Delta;Own%", "News"], rows) if rows else "<p>No material movement.</p>")
-        else:
-            parts.append(
-                f"<h2>What changed</h2><p>{escape(changes.get('reason', 'unavailable'))}</p>"
-            )
-    elif tab == "model":
-        provenance = meta.get("classification", {})
-        items = "".join(
-            f"<li><b>{escape(key.title())}</b>: {escape(value)}</li>" for key, value in provenance.items()
-        )
-        notes = "".join(f"<li>{escape(note)}</li>" for note in payload.get("uncertainty_notes", []))
-        parts.append(
-            f"<h2>Model</h2><p>version {escape(meta['model_version'])}, {meta['player_count']} players</p>"
-            f"<h3>Provenance</h3><ul>{items}</ul><h3>Known limitations</h3><ul>{notes}</ul>"
-        )
-    elif tab == "premier":
-        report = payload.get("team_strength")
-        if not report:
-            parts.append(
-                "<h2>Premier League model</h2><p>No fitted report found on this server yet.</p>"
-            )
-        else:
-            summary = report.get("summary", {})
-            ratings_rows = [
-                [escape(team), f"{value:+.3f}"]
-                for team, value in report.get("final_fit_top_attack", [])[:10]
-            ]
-            examples = "".join(
-                f"<li>{escape(p['home'])} vs {escape(p['away'])}: xG {p['expected_home_goals']} - "
-                f"{p['expected_away_goals']}, P(H/D/A) "
-                f"{p['probabilities']['home_win']:.0%}/{p['probabilities']['draw']:.0%}/"
-                f"{p['probabilities']['away_win']:.0%}</li>"
-                for p in report.get("example_predictions", [])
-            )
-            parts.append(
-                f"<h2>Premier League model (standalone)</h2>"
-                f"<p class=src>walk-forward holdout log loss {summary.get('model_log_loss')} "
-                f"vs uniform {summary.get('uniform_log_loss')}; evaluated {summary.get('evaluated')} matches</p>"
-                f"<h3>Strongest attacks</h3>{_table(['Team', 'Attack'], ratings_rows)}"
-                f"<h3>Example forecasts</h3><ul>{examples}</ul>"
-            )
-    parts.append("</main></body></html>")
-    return "".join(parts)
+TABS: tuple[tuple[str, str], ...] = tuple(webui.ROUTES)
 
 
 def page(tab: str, payload: dict[str, Any]) -> str:
-    nav = "".join(
-        f'<a href="/site/{key}"{" class=active" if key == tab else ""}>{label}</a>'
-        for key, label in TABS
-    )
-    return f'{_STYLE}<nav>{nav}</nav>{render_tab(tab, payload)}'
+    """Render one full website page for the given route."""
+    route = tab if tab in webui.ROUTE_TITLES else "home"
+    return webui.render_page(route, payload)
+
+
+def render_tab(tab: str, payload: dict[str, Any]) -> str:
+    """Backward-compatible alias returning the same complete page."""
+    return page(tab, payload)
+
 
 
 def _attach_team_strength(payload: dict[str, Any]) -> None:
@@ -454,7 +175,120 @@ def build_persisted_cockpit(
         f"persisted run {run['run_id']} ({run['generated_at']}) {run['model_version']}"
     )
     _attach_team_strength(payload)
+    _attach_market_and_season(store, payload, predictions, elements, teams, fixtures)
+    payload["_all_predictions"] = predictions
     return payload, snapshot, predictions
+
+
+def _attach_market_and_season(
+    store: Store,
+    payload: dict[str, Any],
+    predictions: list[Prediction],
+    elements: dict[int, dict[str, Any]],
+    teams: dict[int, dict[str, Any]],
+    fixtures: list[dict[str, Any]],
+) -> None:
+    """Attach market intelligence, deadline metadata and freshness to a payload.
+
+    Everything here is read from Neon; no FPL API calls and no model recomputation.
+    """
+    try:
+        polls = store.market_polls(limit=200)
+        states = store.market_states([row["id"] for row in polls])
+        view = build_market_view(polls, states)
+    except Exception as exc:  # noqa: BLE001 - market must degrade independently
+        view = {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
+    if view.get("available"):
+        fixtures_by_team: dict[int, list[dict[str, str]]] = {}
+        for fixture in fixtures:
+            for side in ("team_h", "team_a"):
+                opponent = "team_a" if side == "team_h" else "team_h"
+                fixtures_by_team.setdefault(int(fixture[side]), []).append(
+                    {
+                        "opponent": str(
+                            teams.get(int(fixture[opponent]), {}).get("short_name", "?")
+                        ),
+                        "venue": "H" if side == "team_h" else "A",
+                    }
+                )
+        enriched = []
+        prediction_by_id = {row.player_id: row for row in predictions}
+        element_by_id = {int(row["player_id"]): row for row in view["players"]}
+        for player_id, row in sorted(element_by_id.items()):
+            element = elements.get(player_id) or {}
+            prediction = prediction_by_id.get(player_id)
+            row = dict(row)
+            row["name"] = element.get("web_name") or (
+                prediction.player_name if prediction else f"#{player_id}"
+            )
+            team_id = int(element.get("team") or (prediction.team_id if prediction else 0))
+            row["team"] = str(teams.get(team_id, {}).get("short_name", "?"))
+            row["position"] = (
+                POSITION_NAMES.get(int(element.get("element_type") or 0))
+                or (prediction.position if prediction else "")
+            )
+            row["fixtures"] = fixtures_by_team.get(team_id, [])
+            row["captured_at"] = view.get("captured_at")
+            enriched.append(row)
+        view["players"] = enriched
+    payload["market"] = view
+    try:
+        events = store.season_events()
+    except Exception:  # noqa: BLE001 - missing table must not break pages
+        events = []
+    target_event = int((payload.get("metadata") or {}).get("target_event") or 0)
+    season_row = next(
+        (row for row in events if row["id"] == target_event),
+        next((row for row in events if row.get("is_next")), None),
+    )
+    payload["season"] = {
+        "deadline_utc": (season_row or {}).get("deadline_time"),
+        "event_name": (season_row or {}).get("name"),
+    }
+    as_of = (payload.get("metadata") or {}).get("data_as_of")
+    minutes_old: int | None = None
+    try:
+        parsed = datetime.fromisoformat(str(as_of).replace("Z", "+00:00"))
+        minutes_old = max(0, int((datetime.now(UTC) - parsed).total_seconds() // 60))
+    except ValueError:
+        pass
+    if minutes_old is None:
+        level = None
+    elif minutes_old < 480:
+        level = "fresh"
+    elif minutes_old < 2880:
+        level = "stale"
+    else:
+        level = "old"
+    payload["freshness"] = {
+        "minutes_old": minutes_old,
+        "level": level,
+        "label": f"updated {_ago(minutes_old)}" if level else "age unknown",
+    }
+
+
+def _ago(minutes: int | None) -> str:
+    from .webui import _ago_display
+
+    return _ago_display(minutes)
+
+
+def _all_player_records(
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Full-squad records powering the players explorer (persisted data only)."""
+    records: list[dict[str, Any]] = []
+    market_rows = {
+        row["player_id"]: row for row in (payload.get("market") or {}).get("players") or []
+    }
+    for row in payload.get("_all_predictions") or []:
+        record = row.to_dict()
+        market_row = market_rows.get(row.player_id, {})
+        record["status"] = market_row.get("status")
+        record["news"] = market_row.get("news")
+        record["fixtures"] = market_row.get("fixtures") or []
+        records.append(record)
+    return records
 
 
 class SiteCache:
@@ -495,6 +329,8 @@ class SiteCache:
                 persisted = None
             if persisted is not None:
                 payload, snapshot, predictions = persisted
+                payload["all_players"] = _all_player_records(payload)
+                payload.pop("_all_predictions", None)
                 self._add_personal_sections(payload, snapshot, predictions)
                 return payload
         payload = build_cockpit(
@@ -504,6 +340,7 @@ class SiteCache:
             limit=30,
         )
         payload["data_source"] = "live fallback"
+        payload.setdefault("all_players", [])
         _attach_team_strength(payload)
         return payload
 
