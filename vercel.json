@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 30,
+      "excludeFiles": "{tests/**,reports/**,research/**,.data/**,.git/**}"
+    }
+  },
+  "rewrites": [
+    { "source": "/", "destination": "/api/index?tab=myteam" },
+    { "source": "/site", "destination": "/api/index?tab=myteam" },
+    { "source": "/site/:tab", "destination": "/api/index?tab=:tab" }
+  ]
+}
