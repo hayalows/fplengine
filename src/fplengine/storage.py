@@ -232,7 +232,20 @@ class Store:
             raise ValueError("Cannot persist an empty prediction set")
         first = predictions[0]
         generated_at = datetime.now(UTC).isoformat()
-        assumptions = json.dumps(first.provenance, sort_keys=True)
+        # Presentation metadata (league scale, confidence labels) is persisted with the
+        # run so read paths can rebuild Prediction objects without recomputing.
+        assumptions = json.dumps(
+            {
+                **first.provenance,
+                "league_total_players": int(
+                    snapshot.bootstrap.get("total_players") or 0
+                ),
+                "prediction_confidence": {
+                    str(row.player_id): row.confidence for row in predictions
+                },
+            },
+            sort_keys=True,
+        )
         runs = self._table("prediction_run")
         with self.connect() as connection:
             cursor = connection.cursor()
@@ -338,6 +351,172 @@ class Store:
                 }
 
             return load(previous_id), load(latest_id)
+
+    def latest_predictions(self) -> dict[str, Any] | None:
+        """Return the newest persisted prediction run with joined player rows.
+
+        The website and read APIs prefer this stored, versioned path over
+        recomputing from the live FPL API on every request.
+        """
+        runs = self._table("prediction_run")
+        preds = self._table("player_prediction")
+        players = self._table("player")
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                self._sql(
+                    f"""SELECT id, target_event, model_version, generated_at, assumptions
+                    FROM {runs} ORDER BY generated_at DESC LIMIT 1"""
+                ),
+                (),
+            )
+            run = cursor.fetchone()
+            if run is None:
+                return None
+            run_id = int(run["id"])
+            cursor.execute(
+                self._sql(
+                    f"""SELECT p.player_id, pl.web_name, pl.team_id, p.expected_minutes,
+                    p.expected_points, p.expected_goals, p.expected_assists,
+                    p.clean_sheet_probability, p.risk, p.lower_bound, p.upper_bound,
+                    p.components
+                    FROM {preds} p JOIN {players} pl ON pl.fpl_id = p.player_id
+                    WHERE p.prediction_run_id=?"""
+                ),
+                (run_id,),
+            )
+            rows = [
+                {
+                    "player_id": int(row["player_id"]),
+                    "name": row["web_name"],
+                    "team_id": int(row["team_id"]),
+                    "expected_minutes": float(row["expected_minutes"]),
+                    "expected_points": float(row["expected_points"]),
+                    "expected_goals": float(row["expected_goals"]),
+                    "expected_assists": float(row["expected_assists"]),
+                    "clean_sheet_probability": float(row["clean_sheet_probability"]),
+                    "risk": float(row["risk"]),
+                    "lower_bound": float(row["lower_bound"]),
+                    "upper_bound": float(row["upper_bound"]),
+                    "components": json.loads(row["components"] or "{}"),
+                }
+                for row in cursor.fetchall()
+            ]
+        assumptions = json.loads(run["assumptions"] or "{}")
+        if not isinstance(assumptions, dict):
+            assumptions = {}
+        return {
+            "run_id": run_id,
+            "target_event": int(run["target_event"]),
+            "model_version": run["model_version"],
+            "generated_at": run["generated_at"],
+            "assumptions": assumptions,
+            "rows": rows,
+        }
+
+    @staticmethod
+    def _iso(value: Any) -> str:
+        return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+    def latest_observation_payload(self) -> dict[str, Any] | None:
+        """Rebuild bootstrap-shaped player/team payloads from the newest ingestion.
+
+        Joins the identity tables with the latest per-player observations so read
+        paths can assemble cockpit sections without touching the live FPL API.
+        """
+        runs = self._table("ingestion_run")
+        teams = self._table("team")
+        players = self._table("player")
+        snapshots = self._table("player_snapshot")
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                self._sql(f"SELECT id, fetched_at FROM {runs} ORDER BY id DESC LIMIT 1"),
+                (),
+            )
+            run = cursor.fetchone()
+            if run is None:
+                return None
+            ingestion_id = int(run["id"])
+            fetched_at = self._iso(run["fetched_at"])
+            cursor.execute(
+                self._sql(
+                    f"""SELECT s.player_id, s.captured_at, s.now_cost, s.selected_percent,
+                    s.status, s.chance_next, s.news, s.transfers_in_event,
+                    s.transfers_out_event, p.fpl_code, p.web_name, p.first_name,
+                    p.second_name, p.position_id, p.team_id
+                    FROM {snapshots} s JOIN {players} p ON p.fpl_id = s.player_id
+                    WHERE s.ingestion_run_id=?"""
+                ),
+                (ingestion_id,),
+            )
+            elements = [
+                {
+                    "id": int(row["player_id"]),
+                    "code": int(row["fpl_code"] or 0),
+                    "web_name": row["web_name"],
+                    "first_name": row["first_name"],
+                    "second_name": row["second_name"],
+                    "element_type": int(row["position_id"]),
+                    "team": int(row["team_id"]),
+                    "now_cost": int(row["now_cost"]),
+                    "selected_by_percent": str(float(row["selected_percent"])),
+                    "status": row["status"],
+                    "chance_of_playing_next_round": (
+                        int(row["chance_next"]) if row["chance_next"] is not None else None
+                    ),
+                    "news": row["news"] or "",
+                    "transfers_in_event": int(row["transfers_in_event"]),
+                    "transfers_out_event": int(row["transfers_out_event"]),
+                    "can_select": True,
+                    "removed": False,
+                    "captured_at": self._iso(row["captured_at"]),
+                }
+                for row in cursor.fetchall()
+            ]
+            cursor.execute(
+                self._sql(f"SELECT fpl_id, name, short_name FROM {teams}"),
+                (),
+            )
+            team_rows = [
+                {"id": int(row["fpl_id"]), "name": row["name"], "short_name": row["short_name"]}
+                for row in cursor.fetchall()
+            ]
+        return {
+            "fetched_at": fetched_at,
+            "elements": elements,
+            "teams": team_rows,
+        }
+
+    def stored_fixtures(self, event_id: int | None = None) -> list[dict[str, Any]]:
+        """Return stored fixtures shaped like the official API payload."""
+        fixtures = self._table("fixture")
+        query = (
+            f"""SELECT fpl_id, event_id, kickoff_time, home_team_id, away_team_id,
+            home_score, away_score, started, finished FROM {fixtures}"""
+        )
+        params: tuple[Any, ...] = ()
+        if event_id is not None:
+            query += " WHERE event_id=?"
+            params = (event_id,)
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            cursor.execute(self._sql(query), params)
+            rows = [
+                {
+                    "id": int(row["fpl_id"]),
+                    "event": int(row["event_id"]) if row["event_id"] is not None else None,
+                    "kickoff_time": self._iso(row["kickoff_time"]),
+                    "team_h": int(row["home_team_id"]),
+                    "team_a": int(row["away_team_id"]),
+                    "team_h_score": row["home_score"],
+                    "team_a_score": row["away_score"],
+                    "started": bool(row["started"]),
+                    "finished": bool(row["finished"]),
+                }
+                for row in cursor.fetchall()
+            ]
+        return rows
 
     def evaluate(
         self,

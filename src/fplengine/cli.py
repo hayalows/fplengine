@@ -14,6 +14,7 @@ from .api_client import FPLAPIError, FPLClient
 from .benchmark import SeasonArchive, benchmark_season, write_benchmark_report
 from .cockpit import build_cockpit, render_text
 from .http_api import serve
+from .web import serve_website
 from .model import ExpectedPointsModel, Prediction
 from .priors import build_prior_payload, write_prior_payload
 from .service import analyze_manager, analyze_manager_cohort, build_report, filter_rankings
@@ -371,6 +372,28 @@ def build_parser() -> argparse.ArgumentParser:
     api.add_argument("--port", type=int, default=8000)
     api.add_argument("--ttl", type=int, default=900)
     api.set_defaults(func=lambda args: serve(args.host, args.port, args.ttl))
+
+    web = subparsers.add_parser("web", help="Serve the thin decision website")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8001)
+    web.add_argument("--database-url")
+    web.add_argument("--entry-id", type=int, default=7181076)
+    web.add_argument(
+        "--init-schema",
+        action="store_true",
+        help="Apply the schema even on Postgres (deployment use only)",
+    )
+    web.add_argument("--ttl", type=int, default=900, help="Payload refresh interval seconds")
+    web.set_defaults(
+        func=lambda args: serve_website(
+            args.host,
+            args.port,
+            args.database_url,
+            args.entry_id,
+            args.init_schema,
+            args.ttl,
+        )
+    )
     return parser
 
 

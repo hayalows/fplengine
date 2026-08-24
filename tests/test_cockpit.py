@@ -211,10 +211,16 @@ class CockpitAssemblyTests(unittest.TestCase):
 
 
 class FakeEntryClient:
-    def __init__(self, picks, history):
+    def __init__(self, picks, history, snapshot=None):
         self._picks = {"picks": picks}
         self._history = history
         self.entry_payload = {"name": "Test FC"}
+        self._snapshot = snapshot
+
+    def snapshot(self):
+        if self._snapshot is None:
+            raise NotImplementedError("no snapshot configured for this fake")
+        return self._snapshot
 
     def entry(self, entry_id):
         return dict(self.entry_payload)
@@ -699,3 +705,4 @@ class SnapshotChangeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
