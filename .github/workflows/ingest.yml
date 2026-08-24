@@ -32,5 +32,7 @@ jobs:
             echo "NEON_DATABASE_URL is not configured; safe no-op."
             exit 0
           fi
-          python -m fplengine run --limit 10
+          # Production schema changes are deployed separately. The scheduled role only
+          # needs DML privileges on the engine schema, never owner-level DDL rights.
+          python -m fplengine.production_run
           python -m fplengine evaluate-latest
