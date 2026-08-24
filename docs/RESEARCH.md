@@ -2,6 +2,30 @@
 
 Research was refreshed on 2026-08-23 and favored primary/official sources.
 
+## Team strength / match probability module v0.1 (2026-08-24)
+
+New standalone `fplengine.team_model`: Maher-style weighted Poisson attack/defence
+ratings plus a fitted home-advantage term, optional Dixon-Coles low-score correction,
+closed-form coordinate ascent fitting (no third-party dependencies), and a
+walk-forward backtester that refits only on strictly earlier matches.
+
+First held-out evaluation: train on 2019/20-2024/25 archive results (2,283 matches;
+earlier seasons lack fixture files), walk-forward through the untouched 2025/26
+season with ratings refreshed every 60 matches:
+
+| Model | Log loss | Brier | Accuracy |
+|---|---|---|---|
+| Poisson ratings | **1.042** | **0.627** | **45.6%** |
+| Train-window outcome rates | 1.084 | 0.656 | 42.4% |
+| Uniform 1/3 | 1.099 | 0.667 | 42.4% |
+
+The ratings beat both baselines on every metric but the margin over simple historical
+frequencies is small; Dixon-Coles rho selected 0.0 and fitted home advantage is about
++7.6% goals. Artifact: `reports/team_strength_backtest.json`. Next levers, in order:
+recency-decay grid, per-era team-name normalization to recover pre-2019 seasons, and
+using these probabilities as an FPL fixture-strength challenger against ordinal
+strength factors.
+
 ## Interval calibration (2026-08-24)
 
 Diagnosis from the split-transition artifact: starter undercoverage is a global
