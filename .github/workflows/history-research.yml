@@ -9,6 +9,7 @@ on:
       - "src/fplengine/history.py"
       - "src/fplengine/model_v3.py"
       - "src/fplengine/history_experiment.py"
+      - "src/fplengine/legacy_history_compat.py"
       - "tests/test_history.py"
       - "tests/test_model_v3.py"
       - ".github/workflows/history-research.yml"
@@ -17,6 +18,7 @@ on:
       - "src/fplengine/history.py"
       - "src/fplengine/model_v3.py"
       - "src/fplengine/history_experiment.py"
+      - "src/fplengine/legacy_history_compat.py"
       - "tests/test_history.py"
       - "tests/test_model_v3.py"
       - ".github/workflows/history-research.yml"
@@ -49,6 +51,8 @@ jobs:
           git sparse-checkout set \
             data/2016-17 data/2017-18 data/2018-19 data/2019-20 data/2020-21 \
             data/2021-22 data/2022-23 data/2023-24 data/2024-25 data/2025-26
+      - name: Normalize legacy metadata without altering source semantics
+        run: python -m fplengine.legacy_history_compat .data/vaastav/data
       - name: Run field-aware walk-forward experiment
         run: |
           python -m fplengine.history_experiment .data/vaastav/data \
