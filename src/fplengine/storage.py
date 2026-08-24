@@ -9,7 +9,7 @@ import re
 import sqlite3
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -71,13 +71,19 @@ class Store:
             connection.close()
 
     def initialize(self) -> None:
-        migration_name = "001_postgres.sql" if self.is_postgres else "001_sqlite.sql"
-        migration = files("fplengine").joinpath("migrations", migration_name).read_text("utf-8")
+        suffix = "postgres.sql" if self.is_postgres else "sqlite.sql"
+        migrations = sorted(
+            path
+            for path in files("fplengine").joinpath("migrations").iterdir()
+            if path.name.endswith(suffix)
+        )
         with self.connect() as connection:
-            if self.is_postgres:
-                connection.execute(migration, prepare=False)
-            else:
-                connection.executescript(migration)
+            for migration in migrations:
+                script = migration.read_text("utf-8")
+                if self.is_postgres:
+                    connection.execute(script, prepare=False)
+                else:
+                    connection.executescript(script)
 
     @staticmethod
     def _current_event(snapshot: Snapshot) -> int | None:
@@ -517,6 +523,209 @@ class Store:
                 for row in cursor.fetchall()
             ]
         return rows
+
+    def save_season_events(self, events: list[dict[str, Any]], fetched_at: str) -> int:
+        """Upsert official gameweek metadata (deadlines etc.) from a bootstrap payload."""
+        table = self._table("season_event")
+        sql = self._sql(
+            f"""INSERT INTO {table}
+            (fpl_id, name, deadline_time, is_next, is_current, finished, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (fpl_id) DO UPDATE SET name=excluded.name,
+            deadline_time=excluded.deadline_time, is_next=excluded.is_next,
+            is_current=excluded.is_current, finished=excluded.finished,
+            updated_at=excluded.updated_at"""
+        )
+        rows = [
+            (
+                int(row["id"]),
+                str(row.get("name") or ""),
+                row.get("deadline_time"),
+                bool(row.get("is_next")),
+                bool(row.get("is_current")),
+                bool(row.get("finished")),
+                fetched_at,
+            )
+            for row in events
+        ]
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            cursor.executemany(sql, rows)
+        return len(rows)
+
+    def season_events(self) -> list[dict[str, Any]]:
+        """Return persisted gameweek metadata ordered by gameweek id."""
+        table = self._table("season_event")
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                self._sql(
+                    f"""SELECT fpl_id, name, deadline_time, is_next, is_current, finished
+                    FROM {table} ORDER BY fpl_id"""
+                ),
+                (),
+            )
+            return [
+                {
+                    "id": int(row["fpl_id"]),
+                    "name": row["name"],
+                    "deadline_time": self._iso(row["deadline_time"]) if row["deadline_time"] else None,
+                    "is_next": bool(row["is_next"]),
+                    "is_current": bool(row["is_current"]),
+                    "finished": bool(row["finished"]),
+                }
+                for row in cursor.fetchall()
+            ]
+
+    def save_market_poll(
+        self, elements: list[dict[str, Any]], captured_at: str, source_hash: str
+    ) -> tuple[int, bool]:
+        """Persist one lightweight market snapshot. Returns (poll_id, was_inserted).
+
+        Identical market states dedupe on source_hash so double-triggered schedules
+        do not grow history; the existing poll id is returned in that case.
+        """
+        polls = self._table("market_poll")
+        states = self._table("market_state")
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                self._sql(
+                    f"""INSERT INTO {polls}
+                    (source_hash, captured_at, player_count)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (source_hash) DO NOTHING"""
+                ),
+                (source_hash, captured_at, len(elements)),
+            )
+            inserted = cursor.rowcount > 0
+            cursor.execute(
+                self._sql(f"SELECT id FROM {polls} WHERE source_hash = ?"),
+                (source_hash,),
+            )
+            row = cursor.fetchone()
+            poll_id = int(row["id"] if hasattr(row, "keys") else row[0])
+            if not inserted:
+                return poll_id, False
+            cursor.executemany(
+                self._sql(
+                    f"""INSERT INTO {states}
+                    (poll_id, player_id, now_cost, selected_percent, transfers_in_event,
+                     transfers_out_event, status, chance_next, news)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+                ),
+                [
+                    (
+                        poll_id,
+                        int(row["id"]),
+                        int(row["now_cost"]),
+                        float(row.get("selected_by_percent") or 0),
+                        int(row.get("transfers_in_event") or 0),
+                        int(row.get("transfers_out_event") or 0),
+                        str(row.get("status") or ""),
+                        row.get("chance_of_playing_next_round"),
+                        str(row.get("news") or ""),
+                    )
+                    for row in elements
+                ],
+            )
+        return poll_id, True
+
+    def market_polls(self, limit: int = 200) -> list[dict[str, Any]]:
+        """Newest market polls first, oldest last in the returned ordering sense."""
+        polls = self._table("market_poll")
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                self._sql(
+                    f"""SELECT id, captured_at, player_count FROM {polls}
+                    ORDER BY captured_at DESC LIMIT {int(limit)}"""
+                ),
+                (),
+            )
+            rows = [
+                {
+                    "id": int(row["id"]),
+                    "captured_at": self._iso(row["captured_at"]),
+                    "player_count": int(row["player_count"]),
+                }
+                for row in cursor.fetchall()
+            ]
+        return rows
+
+    def market_states(self, poll_ids: Sequence[int]) -> dict[int, dict[int, dict[str, Any]]]:
+        """Load full player states for the given polls, keyed [poll_id][player_id].
+
+        Polls without stored rows are simply absent from the result.
+        """
+        if not poll_ids:
+            return {}
+        states = self._table("market_state")
+        placeholders = ",".join("?" for _ in poll_ids)
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                self._sql(
+                    f"""SELECT poll_id, player_id, now_cost, selected_percent,
+                    transfers_in_event, transfers_out_event, status, chance_next, news
+                    FROM {states} WHERE poll_id IN ({placeholders})"""
+                ),
+                tuple(int(pid) for pid in poll_ids),
+            )
+            result: dict[int, dict[int, dict[str, Any]]] = {}
+            for row in cursor.fetchall():
+                result.setdefault(int(row["poll_id"]), {})[int(row["player_id"])] = {
+                    "player_id": int(row["player_id"]),
+                    "now_cost": int(row["now_cost"]),
+                    "selected_percent": float(row["selected_percent"]),
+                    "transfers_in_event": int(row["transfers_in_event"]),
+                    "transfers_out_event": int(row["transfers_out_event"]),
+                    "status": row["status"],
+                    "chance_next": (
+                        int(row["chance_next"]) if row["chance_next"] is not None else None
+                    ),
+                    "news": row["news"],
+                }
+        return result
+
+    def prune_market_history(self, retention_days: int = 7, keep_polls: int = 4) -> int:
+        """Delete market polls older than the retention window, keeping a floor.
+
+        The newest ``keep_polls`` entries always survive so a long scheduling pause
+        can never wipe all history. Returns the number of polls removed.
+        """
+        polls = self._table("market_poll")
+        states = self._table("market_state")
+        cutoff = (
+            datetime.now(UTC) - timedelta(days=retention_days)
+        ).isoformat()
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                self._sql(f"SELECT id, captured_at FROM {polls} ORDER BY captured_at DESC"),
+                (),
+            )
+            rows = [
+                (int(row["id"]), self._iso(row["captured_at"]))
+                for row in cursor.fetchall()
+            ]
+            stale = [
+                pid
+                for index, (pid, captured_at) in enumerate(rows)
+                if index >= keep_polls and captured_at < cutoff
+            ]
+            removed = len(stale)
+            if stale:
+                placeholders = ",".join("?" for _ in stale)
+                cursor.execute(
+                    self._sql(f"DELETE FROM {states} WHERE poll_id IN ({placeholders})"),
+                    tuple(stale),
+                )
+                cursor.execute(
+                    self._sql(f"DELETE FROM {polls} WHERE id IN ({placeholders})"),
+                    tuple(stale),
+                )
+        return removed
 
     def evaluate(
         self,

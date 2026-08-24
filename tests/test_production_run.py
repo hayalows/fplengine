@@ -32,6 +32,9 @@ class ProductionRunTests(unittest.TestCase):
 
             store.initialize.assert_not_called()
             store.save_snapshot.assert_called_once_with(snapshot)
+            store.save_season_events.assert_called_once_with(
+                [], "2026-08-24T00:00:00+00:00"
+            )
             store.save_predictions.assert_called_once_with(7, snapshot, [prediction])
             self.assertEqual(result["ingestion_run_id"], 7)
             self.assertEqual(result["prediction_run_id"], 11)

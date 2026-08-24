@@ -1,0 +1,39 @@
+name: Market intelligence poll
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Half-hourly lightweight capture of official market state (prices, ownership,
+    # transfer counters, status/news) plus gameweek deadline metadata. Never runs
+    # the expected-points model. GitHub may delay scheduled runs by a few minutes;
+    # derived features use actual elapsed time, so drift is handled honestly.
+    - cron: "13,43 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fplengine-market-poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -e ".[postgres]"
+      - name: Capture market state
+        env:
+          FPLENGINE_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        shell: bash
+        run: |
+          if [[ -z "$FPLENGINE_DATABASE_URL" ]]; then
+            echo "NEON_DATABASE_URL is not configured; safe no-op."
+            exit 0
+          fi
+          python -m fplengine.market_run
