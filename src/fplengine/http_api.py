@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .api_client import FPLClient
+from .cockpit import assemble_cockpit, player_detail, render_text
 from .model import ExpectedPointsModel
 from .service import analyze_manager, build_report, filter_rankings
 
@@ -32,7 +33,7 @@ class EngineCache:
             return self.snapshot, self.predictions
 
 
-def make_handler(cache: EngineCache) -> type[BaseHTTPRequestHandler]:
+def make_handler(cache: EngineCache, store: Any = None) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "fplengine/0.2"
 
@@ -71,6 +72,33 @@ def make_handler(cache: EngineCache) -> type[BaseHTTPRequestHandler]:
                     limit = min(50, max(1, int(query.get("limit", [10])[0])))
                     self._json(HTTPStatus.OK, build_report(snapshot, predictions, limit))
                     return
+                if parsed.path == "/cockpit":
+                    limit = min(50, max(1, int(query.get("limit", [15])[0])))
+                    player_query = query.get("player", [None])[0]
+                    payload = assemble_cockpit(
+                        snapshot,
+                        predictions,
+                        store=store,
+                        limit=limit,
+                        player_query=player_query,
+                    )
+                    if query.get("format", ["json"])[0] == "text":
+                        body = render_text(payload)
+                        self.send_response(HTTPStatus.OK.value)
+                        self.send_header("Content-Type", "text/plain; charset=utf-8")
+                        self.send_header("Content-Length", str(len(body.encode("utf-8"))))
+                        self.end_headers()
+                        self.wfile.write(body.encode("utf-8"))
+                        return
+                    self._json(HTTPStatus.OK, payload)
+                    return
+                if parsed.path.startswith("/player/"):
+                    identifier = parsed.path.rsplit("/", 1)[-1]
+                    self._json(
+                        HTTPStatus.OK,
+                        player_detail(snapshot, predictions, identifier),
+                    )
+                    return
                 if parsed.path.startswith("/manager/"):
                     entry_id = int(parsed.path.rsplit("/", 1)[-1])
                     self._json(
@@ -80,7 +108,17 @@ def make_handler(cache: EngineCache) -> type[BaseHTTPRequestHandler]:
                     return
                 self._json(
                     HTTPStatus.NOT_FOUND,
-                    {"error": "not found", "routes": ["/health", "/rankings", "/report", "/manager/{id}"]},
+                    {
+                        "error": "not found",
+                        "routes": [
+                            "/health",
+                            "/rankings",
+                            "/report",
+                            "/cockpit",
+                            "/player/{id_or_name}",
+                            "/manager/{id}",
+                        ],
+                    },
                 )
             except (ValueError, RuntimeError) as exc:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})

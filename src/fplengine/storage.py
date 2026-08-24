@@ -289,6 +289,56 @@ class Store:
             )
         return run_id
 
+    def latest_two_snapshots(self) -> tuple[dict[int, dict[str, Any]], dict[int, dict[str, Any]]]:
+        """Return (previous, latest) player observations from the two newest ingestions.
+
+        Only genuinely distinct ingestion runs are compared, so repeated no-change
+        ingests do not produce empty diffs.
+        """
+        runs = self._table("ingestion_run")
+        snapshots = self._table("player_snapshot")
+        players = self._table("player")
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                self._sql(f"SELECT id, fetched_at FROM {runs} ORDER BY id DESC LIMIT 2"),
+                (),
+            )
+            rows = cursor.fetchall()
+            if len(rows) < 2:
+                raise ValueError(
+                    "Need two stored ingestion runs to compute changes; run ingestion again later"
+                )
+            run_ids = [int(row["id"] if hasattr(row, "keys") else row[0]) for row in rows]
+            previous_id, latest_id = run_ids[1], run_ids[0]
+
+            def load(run_id: int) -> dict[int, dict[str, Any]]:
+                cursor.execute(
+                    self._sql(
+                        f"""SELECT s.player_id, p.web_name, s.captured_at, s.now_cost,
+                        s.selected_percent, s.status, s.news, s.transfers_in_event,
+                        s.transfers_out_event
+                        FROM {snapshots} s JOIN {players} p ON p.fpl_id = s.player_id
+                        WHERE s.ingestion_run_id=?"""
+                    ),
+                    (run_id,),
+                )
+                return {
+                    int(row["player_id"]): {
+                        "web_name": row["web_name"],
+                        "captured_at": row["captured_at"],
+                        "now_cost": int(row["now_cost"]),
+                        "selected_percent": float(row["selected_percent"]),
+                        "status": row["status"],
+                        "news": row["news"],
+                        "transfers_in_event": int(row["transfers_in_event"]),
+                        "transfers_out_event": int(row["transfers_out_event"]),
+                    }
+                    for row in cursor.fetchall()
+                }
+
+            return load(previous_id), load(latest_id)
+
     def evaluate(
         self,
         event_id: int,

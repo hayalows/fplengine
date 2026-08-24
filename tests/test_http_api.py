@@ -62,6 +62,25 @@ class HTTPAPITests(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertEqual(payload["error"], "not found")
 
+    def test_cockpit_route_returns_sections_without_store(self) -> None:
+        status, payload = self.get_json("/cockpit?limit=3&player=Player%203")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["metadata"]["cockpit_version"], "cockpit-v0.1.0")
+        self.assertIn("fixtures", payload)
+        self.assertIn("rankings", payload)
+        self.assertFalse(payload["changes_since_previous_snapshot"]["available"])
+        # The shared five-player test snapshot cannot field a legal squad, so the
+        # optimizer section must degrade independently instead of failing the brief.
+        self.assertIn("error", payload["benchmark_squad"])
+        self.assertIn("skipped", payload["your_transfers"])
+        self.assertEqual(payload["player_detail"]["player_id"], 3)
+
+    def test_player_route_returns_detail(self) -> None:
+        status, payload = self.get_json("/player/1")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["player_id"], 1)
+        self.assertIn("why_top_components", payload)
+
 
 if __name__ == "__main__":
     unittest.main()
