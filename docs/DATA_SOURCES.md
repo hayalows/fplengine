@@ -17,11 +17,37 @@ project must remain conservative about request volume.
 
 | Source | Potential value | Decision |
 |---|---|---|
-| Vaastav FPL historical dataset | player/gameweek history and stable FPL codes | valuable research candidate; weekly updates stopped after 2024/25 and redistribution/license terms require a dedicated review before automated ingestion |
+| Vaastav FPL historical dataset | player/gameweek history and stable FPL codes | high-value research source; completed season directories are present from 2016/17 through 2025/26, but field availability changes by era and data ownership/redistribution terms require care |
 | OpenFootball England/football.json | CC0 fixtures and results | accepted as a future independent results backfill; insufficient alone for FPL player modelling |
 | StatsBomb Open Data | event-model research and xG methodology | accepted for research/training experiments where competitions overlap; not a current live Premier League feed |
 | football-data.co.uk | long match-result/stat/odds history | potentially useful for team models; defer until terms, attribution, columns, and update reliability are pinned |
-| Official player `element-summary` | past FPL seasons per current player | safe targeted enrichment | do not fetch all 609 players on every scheduled run; create a slow cached backfill job |
+| Official player `element-summary` | past FPL seasons per current player | safe targeted enrichment | do not fetch all current players on every scheduled run; create a slow cached backfill job |
+
+## Vaastav historical capability audit
+
+Repository inspection on 2026-08-24 confirmed season directories for 2016/17 through the
+current 2026/27 season. For completed-season modelling, 2016/17 through 2025/26 provides
+roughly ten seasons of potential FPL gameweek evidence.
+
+The seasons are not feature-equivalent:
+
+| Era checked | Observed gameweek capability | Consequence |
+|---|---|---|
+| 2016/17 | points, minutes, goals, assists, BPS, saves, cards, ICT-era and detailed event-count fields; no modern xG/xA or `starts` columns | useful for general FPL/appearance/points priors, but not a drop-in modern xG training set |
+| 2021/22 | position/team labels and archived FPL xP are present; no modern expected-goals fields or `starts` column in the checked GW file | better identity/role context, still limited for modern xG-based features |
+| 2022/23 onward | expected goals, expected assists, expected goals conceded and `starts` are present in the checked data | suitable for modern attacking-rate and role experiments |
+| 2025/26 onward | defensive-contribution fields appear in the checked data | suitable for the current defensive-contribution scoring component |
+
+Therefore historical depth must be feature-specific. A ten-season points/home-advantage
+experiment can legitimately use more history than a modern xG or defensive-contribution
+model. Missing older fields must never be silently replaced with zeros and treated as
+observed evidence.
+
+The repository carries an MIT license for its software, while its license file explicitly
+states that the underlying data belongs to Fantasy Premier League and Understat. FPL
+Engine should therefore keep raw archives as reproducible external research inputs,
+record hashes/provenance, avoid republishing bulky source data, and review source terms
+before any automated redistribution.
 
 ## Rejected for v0.1
 
