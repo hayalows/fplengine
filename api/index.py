@@ -25,6 +25,22 @@ if str(SRC) not in sys.path:
 if not os.environ.get("FPLENGINE_DB_SCHEMA", "").strip():
     os.environ["FPLENGINE_DB_SCHEMA"] = "engine"
 
+# SQLite stores the engine's JSON payloads as text, while Neon exposes the same
+# columns as JSONB and psycopg decodes them to Python objects by default. The
+# existing backend-neutral Store reader parses JSON text itself, so make psycopg
+# return raw JSON text in this read-only serverless process. This affects only
+# connections created after registration and does not alter data in Neon.
+try:
+    from psycopg.types.json import set_json_loads
+
+    def _raw_json(value: str | bytes) -> str:
+        return value.decode("utf-8") if isinstance(value, bytes) else value
+
+    set_json_loads(_raw_json)
+except ImportError:
+    # Local SQLite development doesn't require the Postgres extra.
+    pass
+
 from fplengine.storage import Store  # noqa: E402
 from fplengine.web import SiteCache, TABS, page  # noqa: E402
 
