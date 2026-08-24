@@ -121,7 +121,10 @@ def command_cockpit(args: argparse.Namespace) -> None:
         max_retries=int(os.getenv("FPLENGINE_HTTP_MAX_RETRIES", "3")),
     )
     store = Store(args.database_url)
-    store.initialize()
+    # Schema migration is a deployment concern: the production application role is
+    # least-privilege and must never need DDL. Only local SQLite self-initialises.
+    if not store.is_postgres or args.init_schema:
+        store.initialize()
     cockpit = build_cockpit(
         client,
         store,
@@ -130,6 +133,9 @@ def command_cockpit(args: argparse.Namespace) -> None:
         limit=args.limit,
         squad_file=Path(args.squad_file) if args.squad_file else None,
         player_query=args.player,
+        bank_override=args.bank,
+        free_transfers_override=args.free_transfers,
+        selling_prices_file=Path(args.selling_prices) if args.selling_prices else None,
     )
     if args.json:
         _json(cockpit)
@@ -280,7 +286,22 @@ def build_parser() -> argparse.ArgumentParser:
         "cockpit", parents=[common], help="Assemble the gameweek decision brief"
     )
     cockpit.add_argument("--database-url")
-    cockpit.add_argument("--entry-id", type=int, help="Optional public entry for manager context")
+    cockpit.add_argument("--entry-id", type=int, help="Public FPL entry for MY TEAM / NEXT GW sections")
+    cockpit.add_argument("--bank", type=float, help="USER-SUPPLIED bank in £ millions")
+    cockpit.add_argument(
+        "--free-transfers",
+        type=int,
+        help="USER-SUPPLIED banked free transfers (1-5); otherwise APPROXIMATED",
+    )
+    cockpit.add_argument(
+        "--selling-prices",
+        help="JSON file mapping player_id to exact selling price for transfer plans",
+    )
+    cockpit.add_argument(
+        "--init-schema",
+        action="store_true",
+        help="Apply the schema even on Postgres (deployment use only)",
+    )
     cockpit.add_argument("--squad-file", help="JSON with player_ids(15), bank, free_transfers")
     cockpit.add_argument("--player", help="Add a player detail section by id or name substring")
     cockpit.add_argument("--json", action="store_true")

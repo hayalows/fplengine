@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fplengine.cockpit import (
     assemble_cockpit,
+    build_personal_sections,
     player_detail,
     render_text,
     snapshot_changes,
@@ -205,6 +206,119 @@ class CockpitAssemblyTests(unittest.TestCase):
         for marker in ("Decision Cockpit", "Fixtures", "Rankings", "Captain candidates",
                        "Market movers", "Benchmark squad", "uncertainty"):
             self.assertIn(marker, text)
+
+
+class FakeEntryClient:
+    def __init__(self, picks, history):
+        self._picks = {"picks": picks}
+        self._history = history
+        self.entry_payload = {"name": "Test FC"}
+
+    def entry(self, entry_id):
+        return dict(self.entry_payload)
+
+    def entry_history(self, entry_id):
+        return json.loads(json.dumps(self._history))
+
+    def entry_picks(self, entry_id, event):
+        return json.loads(json.dumps(self._picks))
+
+
+class PersonalSectionTests(unittest.TestCase):
+    def _pick_rows(self) -> list[dict]:
+        # Official-style picks from the synthetic league: slots 1-11 starters,
+        # 12-15 bench in order (GK first). Squad = 2 GK / 5 DEF / 5 MID / 3 FWD.
+        gk, defs, mids, fwds = [1, 6], [2, 3, 4, 5, 7], [8, 9, 10, 11, 12], [13, 14, 15]
+        starters = [gk[0]] + defs[:4] + mids[:4] + fwds[:2]
+        bench = [gk[1], defs[4], mids[4], fwds[2]]
+        rows = []
+        for slot, player_id in enumerate(starters, start=1):
+            rows.append(
+                {
+                    "element": player_id,
+                    "position": slot,
+                    "multiplier": 2 if slot == 10 else 1,
+                    "is_captain": slot == 10,
+                    "is_vice_captain": slot == 9,
+                }
+            )
+        for bench_slot, player_id in enumerate(bench, start=12):
+            rows.append(
+                {
+                    "element": player_id,
+                    "position": bench_slot,
+                    "multiplier": 0,
+                    "is_captain": False,
+                    "is_vice_captain": False,
+                }
+            )
+        return rows
+
+    def setUp(self) -> None:
+        self.snapshot = _league_snapshot()
+        self.predictions = ExpectedPointsModel().predict(self.snapshot)
+        self.client = FakeEntryClient(
+            self._pick_rows(),
+            {
+                "current": [{"event": 1, "bank": 8, "event_transfers": 0}],
+                "chips": [],
+            },
+        )
+
+    def test_my_team_sections_are_complete_and_labelled(self) -> None:
+        sections = build_personal_sections(
+            self.client, self.snapshot, self.predictions, 7181076
+        )
+        players = sections["my_team"]["players"]
+        self.assertEqual(len(players), 15)
+        self.assertEqual(sum(1 for row in players if row["role"] == "starter"), 11)
+        captains = [row for row in players if row["is_captain"]]
+        vices = [row for row in players if row["is_vice_captain"]]
+        self.assertEqual(len(captains), 1)
+        self.assertEqual(len(vices), 1)
+        self.assertTrue(all("fixture" in row and "price" in row for row in players))
+        state = sections["manager_state"]
+        self.assertEqual(state["squad_and_lineup"]["classification"], "VERIFIED")
+        self.assertEqual(state["bank"]["classification"], "RECONSTRUCTED")
+        self.assertEqual(state["free_transfers"]["classification"], "APPROXIMATED")
+
+    def test_user_supplied_overrides_reclassify_state(self) -> None:
+        sections = build_personal_sections(
+            self.client,
+            self.snapshot,
+            self.predictions,
+            7181076,
+            bank_override=0.8,
+            free_transfers_override=2,
+        )
+        state = sections["manager_state"]
+        self.assertEqual(state["bank"]["classification"], "USER-SUPPLIED")
+        self.assertEqual(state["bank"]["value"], 0.8)
+        self.assertEqual(state["free_transfers"]["classification"], "USER-SUPPLIED")
+        label = sections["next_gw"]["recommendation"]["state_label"]
+        # selling prices remain approximated, so the plan is still APPROXIMATE
+        self.assertEqual(label, "APPROXIMATE")
+
+    def test_roll_is_recommended_when_transfers_add_nothing(self) -> None:
+        sections = build_personal_sections(
+            self.client, self.snapshot, self.predictions, 7181076
+        )
+        recommendation = sections["next_gw"]["recommendation"]
+        self.assertIn(recommendation["action"], ("ROLL", "TRANSFER (one)", "TRANSFER (two)"))
+        plan = recommendation["recommended_plan"]
+        self.assertTrue(plan["captain"])
+        self.assertEqual(len(plan["starters"]), 11)
+        self.assertEqual(len(plan["bench_order"]), 4)
+
+    def test_render_text_includes_personal_blocks(self) -> None:
+        sections = build_personal_sections(
+            self.client, self.snapshot, self.predictions, 7181076
+        )
+        cockpit = assemble_cockpit(self.snapshot, self.predictions, limit=5)
+        cockpit.update({key: value for key, value in sections.items()})
+        text = render_text(cockpit)
+        self.assertIn("MY TEAM", text)
+        self.assertIn("NEXT GW RECOMMENDATION", text)
 
 
 class SnapshotChangeTests(unittest.TestCase):
