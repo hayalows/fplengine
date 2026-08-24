@@ -21,10 +21,13 @@ def main() -> None:
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print("profile counts:", json.dumps(result["profile_counts"], sort_keys=True))
     for row in result["leaderboard"]:
         print(
             f"{row['label']}: NDCG={row['all_starter_ndcg_at_10']:.4f} "
             f"club minMAE={row['club_minutes_mae']:.3f} club ptMAE={row['club_points_mae']:.3f} "
+            f"estab minMAE={row['transfer_established_minutes_mae']} "
+            f"toProm minMAE={row['transfer_to_promoted_minutes_mae']} "
             f"promoted minMAE={row['promoted_minutes_mae']:.3f}"
         )
     print(f"report={args.output}")
