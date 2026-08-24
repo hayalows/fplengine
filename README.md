@@ -5,8 +5,11 @@ system. Version 0.2 is deliberately an engine, not a dashboard: it collects norm
 as-of snapshots, produces transparent and versioned expected-points forecasts, records
 those forecasts before deadlines, and evaluates them against final FPL scores.
 
-The recurring cash-cost target is **$0**. Neon Postgres is the intended production
-system of record; SQLite is only the zero-setup local development cache.
+The recurring cash-cost target is **$0**. Neon Postgres is the production system of
+record; SQLite is only the zero-setup local development cache. The validated `engine`
+schema was applied to Neon production on 2026-08-24. Scheduled writes remain deliberately
+secret-gated until the production database credential is rotated and GitHub Actions is
+configured.
 
 ## What v0.2 adds
 
@@ -39,7 +42,7 @@ python -m fplengine manager YOUR_PUBLIC_ENTRY_ID
 python -m unittest discover -v
 ```
 
-To use Neon after the migration is approved and applied:
+To use the production Neon schema after configuring a safe replacement credential:
 
 ```powershell
 python -m pip install -e ".[postgres]"
@@ -48,7 +51,8 @@ python -m fplengine run
 ```
 
 Never commit the connection string. GitHub Actions expects it as the
-`NEON_DATABASE_URL` repository secret.
+`NEON_DATABASE_URL` repository secret. See [Production activation](docs/PRODUCTION.md)
+for the credential, first-run, idempotency, monitoring, and recovery checks.
 
 Run the local API:
 
@@ -105,7 +109,7 @@ resilient client -> normalized as-of observations -> Neon Postgres
 ```
 
 See [Architecture](docs/ARCHITECTURE.md), [data-source decisions](docs/DATA_SOURCES.md),
-[model card](docs/MODEL_CARD.md), [research](docs/RESEARCH.md), and
+[model card](docs/MODEL_CARD.md), [research](docs/RESEARCH.md), [production activation](docs/PRODUCTION.md), and
 [Azure audit](docs/AZURE.md).
 
 ## Evidence labels
@@ -120,6 +124,9 @@ Every decision output distinguishes:
 
 ## Current boundary
 
-This is a benchmarked challenger, not proof of live-season superiority. No 2026/27
-gameweek has yet been evaluated from a preserved pre-deadline v0.2 forecast. Interval
-calibration, promoted/new-signing priors, bonus and transfer-sensitive role changes remain.
+The production schema is live, but scheduled production ingestion is not considered active
+until the exposed database-owner credential is rotated, `NEON_DATABASE_URL` is configured,
+and the first manual plus unchanged-payload idempotency runs are verified. The model is a
+benchmarked challenger, not proof of live-season superiority: no 2026/27 gameweek has yet
+been evaluated from a preserved pre-deadline v0.2 forecast. Interval calibration,
+promoted/new-signing priors, bonus and transfer-sensitive role changes remain.
