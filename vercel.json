@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "python -m pip install -e \".[postgres]\"",
   "regions": ["sfo1"],
   "functions": {
     "api/index.py": {
