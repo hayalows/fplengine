@@ -78,7 +78,8 @@ class handler(BaseHTTPRequestHandler):
             payload = _CACHE.get()
             body = page(_requested_tab(self.path), payload).encode("utf-8")
         except Exception as exc:  # keep deployment failures observable, not silent
-            body = f"FPL Engine request failed: {type(exc).__name__}: {exc}".encode("utf-8")
+            print(f"FPL Engine request failed: {type(exc).__name__}: {exc}")
+            body = b"FPL Engine request failed. Check deployment runtime logs."
             self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
