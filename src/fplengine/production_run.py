@@ -24,6 +24,11 @@ def run_once(database_url: str | None = None) -> dict[str, Any]:
         raise RuntimeError("production_run requires a PostgreSQL production database")
 
     ingestion_id, inserted = store.save_snapshot(snapshot)
+    # Persist official gameweek metadata (deadlines) so read paths can show
+    # countdowns without any page-load call to the FPL API.
+    store.save_season_events(
+        snapshot.bootstrap.get("events") or [], snapshot.fetched_at.isoformat()
+    )
     prediction_run_id = store.save_predictions(ingestion_id, snapshot, predictions)
     return {
         "status": "ok",

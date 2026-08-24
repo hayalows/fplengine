@@ -114,6 +114,13 @@ class FPLClient:
             raise FPLAPIError(f"FPL bootstrap payload is missing: {sorted(missing)}")
         return Snapshot.from_payloads(bootstrap, fixtures)
 
+    def bootstrap(self) -> dict[str, Any]:
+        """Fetch only bootstrap-static; used by the lightweight market poll."""
+        payload = self._get("bootstrap-static/")
+        if not isinstance(payload, dict):
+            raise FPLAPIError("FPL bootstrap-static response was not an object")
+        return payload
+
     def element_summary(self, player_id: int) -> dict[str, Any]:
         return self._get(f"element-summary/{int(player_id)}/")
 
