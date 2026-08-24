@@ -9,7 +9,9 @@ from pathlib import Path
 from fplengine.cockpit import (
     assemble_cockpit,
     build_personal_sections,
+    decide_roll_or_transfer,
     player_detail,
+    reconstruct_free_transfer_balance,
     render_text,
     snapshot_changes,
 )
@@ -224,41 +226,42 @@ class FakeEntryClient:
         return json.loads(json.dumps(self._picks))
 
 
-class PersonalSectionTests(unittest.TestCase):
-    def _pick_rows(self) -> list[dict]:
-        # Official-style picks from the synthetic league: slots 1-11 starters,
-        # 12-15 bench in order (GK first). Squad = 2 GK / 5 DEF / 5 MID / 3 FWD.
-        gk, defs, mids, fwds = [1, 6], [2, 3, 4, 5, 7], [8, 9, 10, 11, 12], [13, 14, 15]
-        starters = [gk[0]] + defs[:4] + mids[:4] + fwds[:2]
-        bench = [gk[1], defs[4], mids[4], fwds[2]]
-        rows = []
-        for slot, player_id in enumerate(starters, start=1):
-            rows.append(
-                {
-                    "element": player_id,
-                    "position": slot,
-                    "multiplier": 2 if slot == 10 else 1,
-                    "is_captain": slot == 10,
-                    "is_vice_captain": slot == 9,
-                }
-            )
-        for bench_slot, player_id in enumerate(bench, start=12):
-            rows.append(
-                {
-                    "element": player_id,
-                    "position": bench_slot,
-                    "multiplier": 0,
-                    "is_captain": False,
-                    "is_vice_captain": False,
-                }
-            )
-        return rows
+def _pick_rows() -> list[dict]:
+    """Official-style picks from the synthetic league: slots 1-11 starters,
+    12-15 bench in order (GK first). Squad = 2 GK / 5 DEF / 5 MID / 3 FWD."""
+    gk, defs, mids, fwds = [1, 6], [2, 3, 4, 5, 7], [8, 9, 10, 11, 12], [13, 14, 15]
+    starters = [gk[0]] + defs[:4] + mids[:4] + fwds[:2]
+    bench = [gk[1], defs[4], mids[4], fwds[2]]
+    rows = []
+    for slot, player_id in enumerate(starters, start=1):
+        rows.append(
+            {
+                "element": player_id,
+                "position": slot,
+                "multiplier": 2 if slot == 10 else 1,
+                "is_captain": slot == 10,
+                "is_vice_captain": slot == 9,
+            }
+        )
+    for bench_slot, player_id in enumerate(bench, start=12):
+        rows.append(
+            {
+                "element": player_id,
+                "position": bench_slot,
+                "multiplier": 0,
+                "is_captain": False,
+                "is_vice_captain": False,
+            }
+        )
+    return rows
 
+
+class PersonalSectionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.snapshot = _league_snapshot()
         self.predictions = ExpectedPointsModel().predict(self.snapshot)
         self.client = FakeEntryClient(
-            self._pick_rows(),
+            _pick_rows(),
             {
                 "current": [{"event": 1, "bank": 8, "event_transfers": 0}],
                 "chips": [],
@@ -280,7 +283,7 @@ class PersonalSectionTests(unittest.TestCase):
         state = sections["manager_state"]
         self.assertEqual(state["squad_and_lineup"]["classification"], "VERIFIED")
         self.assertEqual(state["bank"]["classification"], "RECONSTRUCTED")
-        self.assertEqual(state["free_transfers"]["classification"], "APPROXIMATED")
+        self.assertEqual(state["free_transfers"]["classification"], "RECONSTRUCTED")
 
     def test_user_supplied_overrides_reclassify_state(self) -> None:
         sections = build_personal_sections(
@@ -319,6 +322,159 @@ class PersonalSectionTests(unittest.TestCase):
         text = render_text(cockpit)
         self.assertIn("MY TEAM", text)
         self.assertIn("NEXT GW RECOMMENDATION", text)
+
+
+class RollDecisionCoreTests(unittest.TestCase):
+    """Regression tests for the PR #24 decision bug: the second transfer was judged
+    only against the single-transfer plan instead of against rolling."""
+
+    def test_roll_wins_when_total_double_gain_is_below_threshold(self) -> None:
+        # single gains 0.7 (below threshold), double gains 1.4 total but the old
+        # incremental view (+0.7 over single) also sat under its margin, so PR #24
+        # wrongly rolled despite a 1.4-point total gain.
+        decision = decide_roll_or_transfer(
+            roll_projection=40.0,
+            single_projection=40.7,
+            double_projection=41.4,
+            threshold=0.8,
+        )
+        self.assertEqual(decision["action"], "TRANSFER (two)")
+        self.assertEqual(decision["best_gain_over_roll"], 1.4)
+
+    def test_both_gains_below_threshold_means_roll(self) -> None:
+        decision = decide_roll_or_transfer(
+            roll_projection=40.0,
+            single_projection=40.5,
+            double_projection=40.6,
+        )
+        self.assertEqual(decision["action"], "ROLL")
+        self.assertEqual(decision["gain_single_over_roll"], 0.5)
+        self.assertEqual(decision["gain_double_over_roll"], 0.6)
+
+    def test_single_transfer_chosen_when_double_adds_little_over_roll(self) -> None:
+        # Old code compared +2.0 incremental and would have said two transfers even
+        # though the single plan already captures most of the value vs rolling.
+        decision = decide_roll_or_transfer(
+            roll_projection=40.0,
+            single_projection=42.8,
+            double_projection=43.3,
+            threshold=0.8,
+        )
+        self.assertEqual(decision["action"], "TRANSFER (one)")
+        self.assertGreater(decision["gain_single_over_roll"], 0.8)
+
+    def test_two_transfers_only_when_materially_better_than_single(self) -> None:
+        decision = decide_roll_or_transfer(
+            roll_projection=40.0,
+            single_projection=41.0,
+            double_projection=42.6,
+        )
+        self.assertEqual(decision["action"], "TRANSFER (two)")
+        self.assertAlmostEqual(decision["gain_double_over_roll"], 2.6)
+
+
+class FreeTransferReplayTests(unittest.TestCase):
+    def test_saved_transfer_carries_into_next_gameweek(self) -> None:
+        rows = [{"event": 1, "event_transfers": 0}]
+        result = reconstruct_free_transfer_balance(rows, chips=[])
+        self.assertEqual(result["balance"], 2)
+        self.assertTrue(result["unambiguous"])
+
+    def test_one_used_from_two_rebalances_back_to_two(self) -> None:
+        rows = [
+            {"event": 1, "event_transfers": 0},
+            {"event": 2, "event_transfers": 1},
+        ]
+        result = reconstruct_free_transfer_balance(rows, chips=[])
+        self.assertEqual(result["balance"], 2)
+
+    def test_multiple_saves_stack_up_to_the_cap(self) -> None:
+        rows = [
+            {"event": index, "event_transfers": 0} for index in range(1, 7)
+        ]
+        result = reconstruct_free_transfer_balance(rows, chips=[])
+        self.assertEqual(result["balance"], 5)
+
+    def test_hits_drain_balance_to_the_floor_then_refill_by_one(self) -> None:
+        rows = [
+            {"event": 1, "event_transfers": 0},
+            {"event": 2, "event_transfers": 3},
+        ]
+        result = reconstruct_free_transfer_balance(rows, chips=[])
+        self.assertEqual(result["balance"], 1)
+
+    def test_gap_in_history_or_chip_use_makes_balance_approximate(self) -> None:
+        gapped = [{"event": 2, "event_transfers": 0}, {"event": 4, "event_transfers": 0}]
+        self.assertFalse(reconstruct_free_transfer_balance(gapped)["unambiguous"])
+        chipped = reconstruct_free_transfer_balance(
+            [{"event": 1, "event_transfers": 0}], chips=[{"name": "wildcard"}]
+        )
+        self.assertFalse(chipped["unambiguous"])
+
+    def test_empty_history_has_no_derivable_balance(self) -> None:
+        result = reconstruct_free_transfer_balance([], [])
+        self.assertIsNone(result["balance"])
+
+
+class SellingPriceCoverageTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.snapshot = _league_snapshot()
+        self.predictions = ExpectedPointsModel().predict(self.snapshot)
+        self.client = FakeEntryClient(
+            _pick_rows(),
+            {"current": [{"event": 1, "bank": 8, "event_transfers": 0}], "chips": []},
+        )
+
+    def _sections_with_prices(self, payload: dict[int, float]) -> Any:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "prices.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            return build_personal_sections(
+                self.client,
+                self.snapshot,
+                self.predictions,
+                7181076,
+                bank_override=0.8,
+                free_transfers_override=2,
+                selling_prices_file=path,
+            )
+
+    def test_partial_price_map_stays_approximate(self) -> None:
+        sections = self._sections_with_prices({1: 4.5})
+        state = sections["manager_state"]["selling_prices"]
+        self.assertEqual(state["classification"], "APPROXIMATED")
+        self.assertIn("1/15", state["value"])
+        self.assertEqual(
+            sections["next_gw"]["recommendation"]["state_label"], "APPROXIMATE"
+        )
+
+    def test_full_price_map_earns_verified_inputs_label(self) -> None:
+        owned = sorted(row["element"] for row in _pick_rows())
+        prices = {player_id: 4.0 for player_id in owned}
+        sections = self._sections_with_prices(prices)
+        state = sections["manager_state"]["selling_prices"]
+        self.assertEqual(state["classification"], "USER-SUPPLIED")
+        self.assertEqual(
+            sections["next_gw"]["recommendation"]["state_label"], "VERIFIED_INPUTS"
+        )
+
+    def test_recommendation_reports_gains_against_roll(self) -> None:
+        sections = build_personal_sections(
+            self.client, self.snapshot, self.predictions, 7181076
+        )
+        next_gw = sections["next_gw"]
+        rec = next_gw["recommendation"]
+        roll = next_gw["roll_plan"]["projected_points"]
+        one = next_gw["best_single_transfer"]["projected_points"]
+        two = next_gw["best_two_transfer"]["projected_points"]
+        self.assertAlmostEqual(rec["gain_single_over_roll"], round(one - roll, 3), places=3)
+        self.assertAlmostEqual(rec["gain_double_over_roll"], round(two - roll, 3), places=3)
+        expected_action = (
+            "ROLL"
+            if rec["best_gain_over_roll"] <= 0.8
+            else ("TRANSFER (two)" if rec["gain_double_over_roll"] > rec["gain_single_over_roll"] + 1.0 else "TRANSFER (one)")
+        )
+        self.assertEqual(rec["action"], expected_action)
 
 
 class SnapshotChangeTests(unittest.TestCase):
