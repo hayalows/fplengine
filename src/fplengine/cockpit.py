@@ -236,9 +236,13 @@ def reconstruct_free_transfer_balance(
     wildcard/free-hit chip can be placed on a stored gameweek; post-deadline activity
     since the last finished deadline is never observable. When a transfer-affecting
     chip exists but cannot be mapped to a gameweek, no trustworthy balance can be
-    derived at all and ``balance`` is None rather than a fabricated number. Callers
-    must treat non-unambiguous results as APPROXIMATED/UNKNOWN and prefer a user
-    override for exact optimisation.
+    derived at all and ``balance`` is None rather than a fabricated number. Chips
+    recorded for gameweeks beyond the replayed ledger are reported separately in
+    ``pending_chip_gameweeks``: with a contiguous ledger they necessarily belong to
+    unfinished gameweeks, so the balance derivation stays sound, but callers must
+    surface them (a pending wildcard/free hit means unlimited free transfers apply
+    to that upcoming gameweek). Callers must treat non-unambiguous results as
+    APPROXIMATED/UNKNOWN and prefer a user override for exact optimisation.
     """
     transfer_chip_events, chip_timing_unknown = _transfer_chip_events(chips)
     balance = 1
@@ -261,11 +265,21 @@ def reconstruct_free_transfer_balance(
             balance = next_free_transfers(balance, used)
         previous_event = event
     derivable = bool(current_rows) and contiguous and not chip_timing_unknown
+    replayed_events = {int(row.get("event") or 0) for row in current_rows}
+    pending_chip_gameweeks = sorted(
+        (
+            {"event": event, "name": name}
+            for event, name in transfer_chip_events.items()
+            if event not in replayed_events
+        ),
+        key=lambda row: row["event"],
+    )
     return {
         "balance": balance if derivable else None,
         "unambiguous": derivable,
         "replayed_gameweeks": len(current_rows),
         "chip_gameweeks": chip_gameweeks,
+        "pending_chip_gameweeks": pending_chip_gameweeks,
         "chip_timing_unknown": chip_timing_unknown,
     }
 
@@ -407,16 +421,37 @@ def build_personal_sections(
             bank_reconstructed if bank_reconstructed is not None else 0.0
         )
     )
-    effective_free_transfers = int(
-        free_transfers_override
-        if free_transfers_override is not None
-        else (ft_reconstruction["balance"] or 1)
+    pending_chips = ft_reconstruction["pending_chip_gameweeks"]
+    active_chip = next(
+        (row for row in pending_chips if row["event"] == event_id), None
     )
+    if active_chip is not None:
+        # A confirmed wildcard/free hit for the planning gameweek makes every
+        # transfer free, so the hit-cost arithmetic must not charge any.
+        effective_free_transfers = (
+            int(free_transfers_override)
+            if free_transfers_override is not None
+            else MAX_BANKED_FREE_TRANSFERS
+        )
+    else:
+        effective_free_transfers = int(
+            free_transfers_override
+            if free_transfers_override is not None
+            else (ft_reconstruction["balance"] or 1)
+        )
     chip_weeks = ft_reconstruction["chip_gameweeks"]
     if free_transfers_override is not None:
         ft_note = (
             f"user override takes precedence over the {ft_reconstruction['replayed_gameweeks']} "
             "gameweek ledger replay"
+        )
+    elif active_chip is not None:
+        carried = ft_reconstruction["replayed_gameweeks"]
+        ft_note = (
+            f"{active_chip['name']} confirmed for GW{active_chip['event']}: unlimited "
+            f"free transfers this gameweek; the {carried}-gameweek banked balance "
+            f"({ft_reconstruction['balance']}) carries through the chip unchanged per "
+            "official rules"
         )
     elif ft_reconstruction["chip_timing_unknown"]:
         ft_note = (
@@ -431,6 +466,13 @@ def build_personal_sections(
             f"gameweek(s): banked transfers preserved through {applied} per official "
             f"wildcard/free-hit rules (no consumption, no accrual); supply "
             "--free-transfers to verify exactly"
+        )
+    elif pending_chips:
+        upcoming = ", ".join(f"GW{row['event']} ({row['name']})" for row in pending_chips)
+        ft_note = (
+            f"replay of {ft_reconstruction['replayed_gameweeks']} finished gameweek(s); a "
+            f"wildcard/free hit is already recorded for {upcoming} and will preserve "
+            "this balance when it arrives"
         )
     elif ft_reconstruction["unambiguous"]:
         ft_note = (
@@ -459,6 +501,7 @@ def build_personal_sections(
             "value": effective_free_transfers,
             "classification": (
                 "USER-SUPPLIED" if free_transfers_override is not None
+                else "VERIFIED" if active_chip is not None
                 else "RECONSTRUCTED"
                 if ft_reconstruction["unambiguous"] and not chip_weeks
                 else "APPROXIMATED"

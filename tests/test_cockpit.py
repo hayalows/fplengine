@@ -342,6 +342,37 @@ class PersonalSectionTests(unittest.TestCase):
         self.assertEqual(state["classification"], "USER-SUPPLIED")
         self.assertIn("override", state["note"])
 
+    def test_chip_confirmed_for_the_upcoming_gameweek_makes_transfers_free(self) -> None:
+        client = FakeEntryClient(
+            _pick_rows(),
+            {
+                "current": [{"event": 1, "bank": 8, "event_transfers": 0}],
+                "chips": [{"name": "wildcard", "event": 3, "entry": 7181076}],
+            },
+        )
+        sections = build_personal_sections(client, self.snapshot, self.predictions, 7181076)
+        state = sections["manager_state"]["free_transfers"]
+        self.assertEqual(state["value"], 5)
+        self.assertEqual(state["classification"], "VERIFIED")
+        self.assertIn("GW3", state["note"])
+        # Under an active wildcard the single-transfer plan must not be charged a hit.
+        self.assertEqual(sections["next_gw"]["best_single_transfer"]["hit_cost"], 0)
+
+    def test_override_wins_even_when_a_chip_is_active_for_the_upcoming_gameweek(self) -> None:
+        client = FakeEntryClient(
+            _pick_rows(),
+            {
+                "current": [{"event": 1, "bank": 8, "event_transfers": 0}],
+                "chips": [{"name": "freehit", "event": 3, "entry": 7181076}],
+            },
+        )
+        sections = build_personal_sections(
+            client, self.snapshot, self.predictions, 7181076, free_transfers_override=2
+        )
+        state = sections["manager_state"]["free_transfers"]
+        self.assertEqual(state["value"], 2)
+        self.assertEqual(state["classification"], "USER-SUPPLIED")
+
     def test_roll_is_recommended_when_transfers_add_nothing(self) -> None:
         sections = build_personal_sections(
             self.client, self.snapshot, self.predictions, 7181076
@@ -562,6 +593,19 @@ class ChipAwareFreeTransferReplayTests(unittest.TestCase):
         self.assertFalse(result["unambiguous"])
         self.assertIsNone(result["balance"])
         self.assertTrue(result["chip_timing_unknown"])
+
+    def test_chip_recorded_beyond_the_replayed_ledger_is_reported_as_pending(self) -> None:
+        # GW2 has not produced a stored row yet; the contiguous ledger through GW1
+        # stays derivable and the upcoming wildcard must be surfaced, not ignored.
+        result = self._replay(
+            [{"event": 1, "event_transfers": 0}],
+            [{"name": "wildcard", "event": 2}],
+        )
+        self.assertEqual(result["balance"], 2)
+        self.assertTrue(result["unambiguous"])
+        self.assertEqual(
+            result["pending_chip_gameweeks"], [{"event": 2, "name": "wildcard"}]
+        )
 
 
 class SellingPriceCoverageTests(unittest.TestCase):
