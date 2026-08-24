@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "fplengine contributors" }]
-dependencies = []
+dependencies = ["pulp>=3.2,<4"]
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2,<4"]
