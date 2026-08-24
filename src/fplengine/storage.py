@@ -339,6 +339,62 @@ class Store:
 
             return load(previous_id), load(latest_id)
 
+    def latest_predictions(self) -> dict[str, Any] | None:
+        """Return the newest persisted prediction run with joined player rows.
+
+        The website and read APIs prefer this stored, versioned path over
+        recomputing from the live FPL API on every request.
+        """
+        runs = self._table("prediction_run")
+        preds = self._table("player_prediction")
+        players = self._table("player")
+        with self.connect() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                self._sql(
+                    f"""SELECT id, target_event, model_version, generated_at, assumptions
+                    FROM {runs} ORDER BY generated_at DESC LIMIT 1"""
+                ),
+                (),
+            )
+            run = cursor.fetchone()
+            if run is None:
+                return None
+            run_id = int(run["id"])
+            cursor.execute(
+                self._sql(
+                    f"""SELECT p.player_id, pl.web_name, pl.team_id, p.expected_minutes,
+                    p.expected_points, p.expected_goals, p.expected_assists,
+                    p.clean_sheet_probability, p.risk, p.lower_bound, p.upper_bound,
+                    p.components
+                    FROM {preds} p JOIN {players} pl ON pl.fpl_id = p.player_id
+                    WHERE p.prediction_run_id=?"""
+                ),
+                (run_id,),
+            )
+            rows = [
+                {
+                    "player_id": int(row["player_id"]),
+                    "name": row["web_name"],
+                    "team_id": int(row["team_id"]),
+                    "expected_minutes": float(row["expected_minutes"]),
+                    "expected_points": float(row["expected_points"]),
+                    "risk": float(row["risk"]),
+                    "lower_bound": float(row["lower_bound"]),
+                    "upper_bound": float(row["upper_bound"]),
+                    "components": json.loads(row["components"] or "{}"),
+                }
+                for row in cursor.fetchall()
+            ]
+        return {
+            "run_id": run_id,
+            "target_event": int(run["target_event"]),
+            "model_version": run["model_version"],
+            "generated_at": run["generated_at"],
+            "assumptions": json.loads(run["assumptions"] or "{}"),
+            "rows": rows,
+        }
+
     def evaluate(
         self,
         event_id: int,
