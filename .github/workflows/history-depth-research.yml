@@ -4,9 +4,15 @@ on:
   push:
     branches:
       - research/history-depth-run
+    paths-ignore:
+      - reports/history_depth_2025_26.json
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: history-depth-research
+  cancel-in-progress: true
 
 jobs:
   benchmark:
@@ -36,3 +42,13 @@ jobs:
           path: reports/history_depth_2025_26.json
           if-no-files-found: ignore
           retention-days: 7
+      - name: Commit research report to this branch
+        if: success()
+        shell: bash
+        run: |
+          git config user.name "fplengine-research-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add reports/history_depth_2025_26.json
+          git diff --cached --quiet && exit 0
+          git commit -m "research: record held-out history-depth results"
+          git push origin HEAD:research/history-depth-run
