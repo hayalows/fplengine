@@ -8,6 +8,7 @@ observed zero. The output keeps per-field exposure and can be merged with recenc
 from __future__ import annotations
 
 import csv
+import io
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
@@ -44,15 +45,28 @@ def _int(value: Any) -> int:
     return int(_float(value))
 
 
+def _csv_text(path: Path) -> str:
+    """Decode historical archive CSVs without silently replacing characters.
+
+    Recent Vaastav seasons are UTF-8, while some early seasons are Latin-1. Decode
+    UTF-8 (including an optional BOM) first and fall back to Latin-1 only on a genuine
+    Unicode decode failure. Latin-1 is lossless for every byte, so this preserves names
+    and headers instead of hiding corruption with replacement characters.
+    """
+    raw = path.read_bytes()
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
+
+
 def _read_csv(path: Path) -> list[dict[str, str]]:
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        return list(csv.DictReader(handle))
+    return list(csv.DictReader(io.StringIO(_csv_text(path), newline="")))
 
 
 def _fieldnames(path: Path) -> set[str]:
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.reader(handle)
-        return set(next(reader, []))
+    reader = csv.reader(io.StringIO(_csv_text(path), newline=""))
+    return set(next(reader, []))
 
 
 def season_field_manifest(season_dir: Path) -> dict[str, bool]:
