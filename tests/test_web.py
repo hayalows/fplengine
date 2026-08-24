@@ -133,10 +133,13 @@ class PersistedDataPathTests(unittest.TestCase):
             dict(row, transfers_in_event=row["transfers_in_event"] - 300) for row in base_elements
         ]
         self.store.save_market_poll(
-            older, (now - timedelta(hours=7)).isoformat(), "e" * 64
+            older, (now - timedelta(hours=7)).isoformat(), "e" * 64, event_id=2
         )
         self.store.save_market_poll(
-            base_elements, (now - timedelta(minutes=10)).isoformat(), "f" * 64
+            base_elements,
+            (now - timedelta(minutes=10)).isoformat(),
+            "f" * 64,
+            event_id=2,
         )
 
     def test_persisted_payload_includes_market_season_and_freshness(self) -> None:
