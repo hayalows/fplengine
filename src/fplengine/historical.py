@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 POSITION_NAMES = {"GK", "DEF", "MID", "FWD"}
+ELEMENT_TYPE_POSITIONS = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
 RATE_FIELDS = (
     "expected_goals",
     "expected_assists",
@@ -102,9 +103,27 @@ def build_season_evidence(season_dir: Path, season: str) -> dict[str, Any]:
 
     Only observed fields receive exposure. For example, 2018/19 minutes do not dilute a
     2024/25 xG rate because the older archive did not contain expected_goals.
+
+    Early Vaastav gameweek CSVs predate the convenience ``position`` and ``team``
+    columns. In those eras, immutable season metadata from ``players_raw.csv`` is the
+    source of truth for position and a stable presentation fallback for team. This keeps
+    2016/17-era minutes/points evidence in the experiment instead of silently dropping
+    every row.
     """
     player_rows = _read_csv(season_dir / "players_raw.csv")
-    id_to_code = {_int(row.get("id")): _int(row.get("code")) for row in player_rows}
+    id_to_meta: dict[int, dict[str, Any]] = {}
+    for row in player_rows:
+        element_id = _int(row.get("id"))
+        code = _int(row.get("code"))
+        position = ELEMENT_TYPE_POSITIONS.get(_int(row.get("element_type")), "")
+        team_code = _int(row.get("team_code"))
+        team_id = _int(row.get("team"))
+        if element_id and code:
+            id_to_meta[element_id] = {
+                "code": code,
+                "position": position,
+                "team": f"team_code:{team_code}" if team_code else f"team_id:{team_id}",
+            }
     manifest = season_field_manifest(season_dir)
     gw_paths = sorted(
         (season_dir / "gws").glob("gw*.csv"),
@@ -118,15 +137,17 @@ def build_season_evidence(season_dir: Path, season: str) -> dict[str, Any]:
     for path in gw_paths:
         for row in _read_csv(path):
             element_id = _int(row.get("element"))
-            code = id_to_code.get(element_id)
-            position = row.get("position") or ""
+            meta = id_to_meta.get(element_id, {})
+            code = _int(meta.get("code"))
+            position = row.get("position") or meta.get("position") or ""
+            team = row.get("team") or meta.get("team") or ""
             if not code or position not in POSITION_NAMES:
                 continue
             state = players.setdefault(
                 code,
                 {
                     "position": position,
-                    "team": row.get("team") or "",
+                    "team": team,
                     "minutes": 0.0,
                     "total_points": 0.0,
                     "opportunities": 0.0,
@@ -139,7 +160,7 @@ def build_season_evidence(season_dir: Path, season: str) -> dict[str, Any]:
                     **{f"{field}_minutes": 0.0 for field in RATE_FIELDS},
                 },
             )
-            state["team"] = row.get("team") or state["team"]
+            state["team"] = team or state["team"]
             minutes = _float(row.get("minutes"))
             state["minutes"] += minutes
             state["total_points"] += _float(row.get("total_points"))
