@@ -302,6 +302,46 @@ class PersonalSectionTests(unittest.TestCase):
         # selling prices remain approximated, so the plan is still APPROXIMATE
         self.assertEqual(label, "APPROXIMATE")
 
+    def test_chipped_history_replays_chip_rule_and_stays_labelled_approximate(self) -> None:
+        client = FakeEntryClient(
+            _pick_rows(),
+            {
+                "current": [
+                    {"event": 1, "bank": 8, "event_transfers": 0},
+                    {"event": 2, "bank": 5, "event_transfers": 9},
+                ],
+                "chips": [{"name": "wildcard", "event": 2, "entry": 7181076}],
+            },
+        )
+        sections = build_personal_sections(client, self.snapshot, self.predictions, 7181076)
+        state = sections["manager_state"]["free_transfers"]
+        # GW1 saved the opening FT; the nine wildcard moves in GW2 preserved it.
+        self.assertEqual(state["value"], 2)
+        self.assertEqual(state["classification"], "APPROXIMATED")
+        self.assertIn("GW2 (wildcard)", state["note"])
+        self.assertIn("--free-transfers", state["note"])
+        label = sections["next_gw"]["recommendation"]["state_label"]
+        self.assertEqual(label, "APPROXIMATE")
+
+    def test_free_transfers_override_wins_over_chip_aware_replay(self) -> None:
+        client = FakeEntryClient(
+            _pick_rows(),
+            {
+                "current": [
+                    {"event": 1, "bank": 8, "event_transfers": 0},
+                    {"event": 2, "bank": 5, "event_transfers": 9},
+                ],
+                "chips": [{"name": "wildcard", "event": 2, "entry": 7181076}],
+            },
+        )
+        sections = build_personal_sections(
+            client, self.snapshot, self.predictions, 7181076, free_transfers_override=4
+        )
+        state = sections["manager_state"]["free_transfers"]
+        self.assertEqual(state["value"], 4)
+        self.assertEqual(state["classification"], "USER-SUPPLIED")
+        self.assertIn("override", state["note"])
+
     def test_roll_is_recommended_when_transfers_add_nothing(self) -> None:
         sections = build_personal_sections(
             self.client, self.snapshot, self.predictions, 7181076
@@ -403,17 +443,125 @@ class FreeTransferReplayTests(unittest.TestCase):
         result = reconstruct_free_transfer_balance(rows, chips=[])
         self.assertEqual(result["balance"], 1)
 
-    def test_gap_in_history_or_chip_use_makes_balance_approximate(self) -> None:
+    def test_gap_in_history_makes_balance_not_derivable(self) -> None:
         gapped = [{"event": 2, "event_transfers": 0}, {"event": 4, "event_transfers": 0}]
-        self.assertFalse(reconstruct_free_transfer_balance(gapped)["unambiguous"])
-        chipped = reconstruct_free_transfer_balance(
-            [{"event": 1, "event_transfers": 0}], chips=[{"name": "wildcard"}]
-        )
-        self.assertFalse(chipped["unambiguous"])
+        result = reconstruct_free_transfer_balance(gapped)
+        self.assertFalse(result["unambiguous"])
+        self.assertIsNone(result["balance"])
 
     def test_empty_history_has_no_derivable_balance(self) -> None:
         result = reconstruct_free_transfer_balance([], [])
         self.assertIsNone(result["balance"])
+
+
+class ChipAwareFreeTransferReplayTests(unittest.TestCase):
+    """Official wildcard/free-hit banking rule: unlimited chip transfers are free,
+    neither consume banked free transfers nor earn the weekly +1 accrual - the
+    balance carries through unchanged. Bench Boost/Triple Captain stay ordinary."""
+
+    def _replay(self, rows, chips):
+        return reconstruct_free_transfer_balance(rows, chips)
+
+    def test_manager_enters_chip_gameweek_with_one_free_transfer(self) -> None:
+        # GW1 spends the opening FT (balance stays 1); GW2 wildcard makes six more
+        # changes without touching the banked transfer.
+        result = self._replay(
+            [
+                {"event": 1, "event_transfers": 1},
+                {"event": 2, "event_transfers": 6},
+            ],
+            [{"name": "wildcard", "event": 2}],
+        )
+        self.assertEqual(result["balance"], 1)
+        self.assertTrue(result["unambiguous"])
+        self.assertEqual(
+            result["chip_gameweeks"], [{"event": 2, "name": "wildcard"}]
+        )
+
+    def test_wildcard_with_many_changes_preserves_three_saved_transfers(self) -> None:
+        # Two saved gameweeks give 3 FTs entering GW3; ten wildcard changes must not
+        # drain them (ordinary replay would have floored the balance to 1).
+        result = self._replay(
+            [
+                {"event": 1, "event_transfers": 0},
+                {"event": 2, "event_transfers": 0},
+                {"event": 3, "event_transfers": 10},
+            ],
+            [{"name": "wildcard", "event": 3}],
+        )
+        self.assertEqual(result["balance"], 3)
+        self.assertTrue(result["unambiguous"])
+
+    def test_free_hit_with_many_changes_preserves_saved_transfers(self) -> None:
+        result = self._replay(
+            [
+                {"event": 1, "event_transfers": 0},
+                {"event": 2, "event_transfers": 0},
+                {"event": 3, "event_transfers": 15},
+            ],
+            [{"name": "freehit", "event": 3}],
+        )
+        self.assertEqual(result["balance"], 3)
+        self.assertTrue(result["unambiguous"])
+        self.assertEqual(result["chip_gameweeks"][0]["name"], "freehit")
+
+    def test_chip_gameweek_earns_no_extra_accrual(self) -> None:
+        # Entering a zero-transfer wildcard with 2 saved FTs must exit with 2, not 3:
+        # the weekly +1 accrual is replaced by the chip.
+        result = self._replay(
+            [
+                {"event": 1, "event_transfers": 0},
+                {"event": 2, "event_transfers": 0},
+            ],
+            [{"name": "wildcard", "event": 2}],
+        )
+        self.assertEqual(result["balance"], 2)
+
+    def test_ordinary_recurrence_resumes_after_the_chip(self) -> None:
+        # FH preserves 2 FTs in GW2; GW3 then follows next_free_transfers normally
+        # (one spent from two leaves one, plus the weekly accrual = two).
+        result = self._replay(
+            [
+                {"event": 1, "event_transfers": 0},
+                {"event": 2, "event_transfers": 12},
+                {"event": 3, "event_transfers": 1},
+            ],
+            [{"name": "free_hit", "event": 2}],
+        )
+        self.assertEqual(result["balance"], 2)
+
+    def test_bench_boost_weeks_follow_ordinary_transfer_rules(self) -> None:
+        result = self._replay(
+            [
+                {"event": 1, "event_transfers": 0},
+                {"event": 2, "event_transfers": 2},
+                {"event": 3, "event_transfers": 0},
+            ],
+            [{"name": "bboost", "event": 2}],
+        )
+        self.assertEqual(result["balance"], 2)
+        self.assertEqual(result["chip_gameweeks"], [])
+
+    def test_non_chip_gameweeks_still_replay_next_free_transfers(self) -> None:
+        result = self._replay(
+            [
+                {"event": 1, "event_transfers": 3},
+                {"event": 2, "event_transfers": 0},
+            ],
+            [],
+        )
+        # 1 FT, three moves -> hit floor 0 + accrual = 1, saving again -> 2.
+        self.assertEqual(result["balance"], 2)
+        self.assertTrue(result["unambiguous"])
+
+    def test_unmappable_transfer_chip_yields_no_balance_instead_of_a_guess(self) -> None:
+        result = self._replay(
+            [{"event": 1, "event_transfers": 4}],
+            [{"name": "wildcard"}],
+        )
+        self.assertFalse(result["unambiguous"])
+        self.assertIsNone(result["balance"])
+        self.assertTrue(result["chip_timing_unknown"])
 
 
 class SellingPriceCoverageTests(unittest.TestCase):

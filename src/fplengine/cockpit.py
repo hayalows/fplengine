@@ -182,39 +182,91 @@ def _load_squad_file(path: Path) -> dict[str, Any]:
 
 ROLL_GAIN_THRESHOLD = 0.8
 
+_TRANSFER_CHIP_ALIASES = {
+    "wildcard": "wildcard",
+    "wc": "wildcard",
+    "freehit": "freehit",
+    "free_hit": "freehit",
+    "fh": "freehit",
+}
+
+
+def _transfer_chip_events(chips: list[Any] | None) -> tuple[dict[int, str], bool]:
+    """Map gameweek -> wildcard/free-hit chip; report rows whose timing is unknown.
+
+    Only Wildcard and Free Hit change transfer accounting; Bench Boost and Triple
+    Captain weeks follow ordinary free-transfer rules. A chip row without a usable
+    gameweek cannot be placed in the ledger, which makes the whole replay unverifiable.
+    """
+    mapping: dict[int, str] = {}
+    timing_unknown = False
+    for chip in chips or []:
+        raw_name = str(chip.get("name") or "").strip().lower() if isinstance(chip, dict) else ""
+        name = _TRANSFER_CHIP_ALIASES.get(raw_name)
+        if name is None:
+            continue
+        try:
+            event = int(chip.get("event"))
+        except (TypeError, ValueError):
+            timing_unknown = True
+            continue
+        if event < 1:
+            timing_unknown = True
+            continue
+        mapping[event] = name
+    return mapping, timing_unknown
+
 
 def reconstruct_free_transfer_balance(
     current_rows: list[dict[str, Any]],
     chips: list[Any] | None = None,
 ) -> dict[str, Any]:
-    """Replay the season's transfer ledger under 2026/27 carry/banking rules.
+    """Replay the season's transfer ledger under 2025/26+ carry/banking rules.
 
-    Starts from one free transfer before GW1 and applies ``next_free_transfers``
-    after every finished gameweek in chronological order, so saved transfers roll
-    forward (capped at five), used transfers are consumed first, and hits simply
-    leave the balance at its floor. The result is only unambiguous when the stored
-    history is contiguous from event 1 and no chips were used: Free Hit/Wildcard
-    interactions and post-deadline activity cannot be observed publicly. Ambiguous
-    ledgers still return the replayed balance as a best guess for transparency,
-    but callers must treat it as APPROXIMATED/UNKNOWN.
+    Starts from one free transfer before GW1 and replays every finished gameweek in
+    chronological order. Ordinary gameweeks apply ``next_free_transfers`` (saves roll
+    forward capped at five, usage is consumed first, hits floor the balance). In a
+    Wildcard or Free Hit gameweek the official rule is different: those unlimited
+    transfers are free, they neither consume nor accrue banked free transfers, so the
+    balance simply carries through unchanged ("if you had 2 saved free transfers you
+    will still have 2 the following Gameweek" - official FPL rules). Bench Boost and
+    Triple Captain do not affect the ledger and are replayed ordinarily.
+
+    ``balance`` is only exact when the stored history is contiguous from GW1 and every
+    wildcard/free-hit chip can be placed on a stored gameweek; post-deadline activity
+    since the last finished deadline is never observable. When a transfer-affecting
+    chip exists but cannot be mapped to a gameweek, no trustworthy balance can be
+    derived at all and ``balance`` is None rather than a fabricated number. Callers
+    must treat non-unambiguous results as APPROXIMATED/UNKNOWN and prefer a user
+    override for exact optimisation.
     """
+    transfer_chip_events, chip_timing_unknown = _transfer_chip_events(chips)
     balance = 1
     previous_event: int | None = None
     contiguous = True
+    chip_gameweeks: list[dict[str, Any]] = []
     for row in sorted(current_rows, key=lambda item: int(item.get("event") or 0)):
         event = int(row.get("event") or 0)
         if previous_event is None:
             contiguous = contiguous and event == 1
         else:
             contiguous = contiguous and event == previous_event + 1
-        used = max(0, int(row.get("event_transfers") or 0))
-        balance = next_free_transfers(balance, used)
+        chip_name = transfer_chip_events.get(event)
+        if chip_name is not None:
+            # Official wildcard/free-hit semantics: unlimited free transfers that do
+            # not touch the banked balance and earn no weekly accrual themselves.
+            chip_gameweeks.append({"event": event, "name": chip_name})
+        else:
+            used = max(0, int(row.get("event_transfers") or 0))
+            balance = next_free_transfers(balance, used)
         previous_event = event
-    unambiguous = bool(current_rows) and contiguous and not chips
+    derivable = bool(current_rows) and contiguous and not chip_timing_unknown
     return {
-        "balance": balance if current_rows else None,
-        "unambiguous": unambiguous,
+        "balance": balance if derivable else None,
+        "unambiguous": derivable,
         "replayed_gameweeks": len(current_rows),
+        "chip_gameweeks": chip_gameweeks,
+        "chip_timing_unknown": chip_timing_unknown,
     }
 
 
@@ -360,6 +412,35 @@ def build_personal_sections(
         if free_transfers_override is not None
         else (ft_reconstruction["balance"] or 1)
     )
+    chip_weeks = ft_reconstruction["chip_gameweeks"]
+    if free_transfers_override is not None:
+        ft_note = (
+            f"user override takes precedence over the {ft_reconstruction['replayed_gameweeks']} "
+            "gameweek ledger replay"
+        )
+    elif ft_reconstruction["chip_timing_unknown"]:
+        ft_note = (
+            "a wildcard/free hit was used but its gameweek is absent from the stored "
+            "ledger; balance not publicly derivable - supply --free-transfers for exact "
+            "transfer optimisation"
+        )
+    elif chip_weeks:
+        applied = ", ".join(f"GW{row['event']} ({row['name']})" for row in chip_weeks)
+        ft_note = (
+            f"chip-aware replay of {ft_reconstruction['replayed_gameweeks']} finished "
+            f"gameweek(s): banked transfers preserved through {applied} per official "
+            f"wildcard/free-hit rules (no consumption, no accrual); supply "
+            "--free-transfers to verify exactly"
+        )
+    elif ft_reconstruction["unambiguous"]:
+        ft_note = (
+            f"chronological replay of {ft_reconstruction['replayed_gameweeks']} finished "
+            f"gameweek(s) under carry rules (cap {MAX_BANKED_FREE_TRANSFERS})"
+        )
+    else:
+        ft_note = (
+            "ledger incomplete; balance not publicly derivable - supply --free-transfers"
+        )
     manager_state = {
         "squad_and_lineup": {
             "value": f"GW{picks_event} official picks",
@@ -378,15 +459,11 @@ def build_personal_sections(
             "value": effective_free_transfers,
             "classification": (
                 "USER-SUPPLIED" if free_transfers_override is not None
-                else "RECONSTRUCTED" if ft_reconstruction["unambiguous"]
+                else "RECONSTRUCTED"
+                if ft_reconstruction["unambiguous"] and not chip_weeks
                 else "APPROXIMATED"
             ),
-            "note": (
-                f"chronological replay of {ft_reconstruction['replayed_gameweeks']} finished "
-                f"gameweek(s) under carry rules (cap {MAX_BANKED_FREE_TRANSFERS})"
-                if ft_reconstruction["unambiguous"]
-                else "ledger incomplete or chip activity present; balance not publicly derivable"
-            ),
+            "note": ft_note,
         },
         "selling_prices": {
             "value": (
@@ -404,7 +481,10 @@ def build_personal_sections(
         },
         "chips": {
             "value": chips_used,
-            "classification": "VERIFIED (used chips only); remaining chip state NOT YET MODELLED",
+            "classification": (
+                "VERIFIED (used chips); wildcard/free-hit carry-over is applied to the "
+                "free-transfer replay"
+            ),
         },
     }
 
