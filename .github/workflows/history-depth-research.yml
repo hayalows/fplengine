@@ -1,0 +1,38 @@
+name: History depth research
+
+on:
+  push:
+    branches:
+      - research/history-depth-run
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -e .
+      - name: Fetch public historical archive sparsely
+        shell: bash
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/vaastav/Fantasy-Premier-League.git /tmp/vaastav
+          cd /tmp/vaastav
+          git sparse-checkout set \
+            data/2016-17 data/2017-18 data/2018-19 data/2019-20 data/2020-21 \
+            data/2021-22 data/2022-23 data/2023-24 data/2024-25 data/2025-26
+      - name: Run held-out 2025-26 history-depth benchmark
+        run: python research/run_history_depth.py --data-root /tmp/vaastav/data
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: history-depth-2025-26
+          path: reports/history_depth_2025_26.json
+          if-no-files-found: ignore
+          retention-days: 7
