@@ -1,12 +1,30 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
-from fplengine.historical import history_window_variants, merge_season_evidence
+from fplengine.historical import _fieldnames, _read_csv, history_window_variants, merge_season_evidence
 from fplengine.historical_model import HistoricalExpectedPointsModel
 
 
 class HistoricalEvidenceTests(unittest.TestCase):
+    def test_latin1_archive_csv_preserves_accented_names_and_headers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "gw1.csv"
+            path.write_bytes(
+                "name,element,position,minutes,total_points\nJosé Ángel,7,MID,90,6\n".encode(
+                    "latin-1"
+                )
+            )
+            rows = _read_csv(path)
+            self.assertEqual(rows[0]["name"], "José Ángel")
+            self.assertEqual(rows[0]["element"], "7")
+            self.assertEqual(
+                _fieldnames(path),
+                {"name", "element", "position", "minutes", "total_points"},
+            )
+
     def test_missing_old_xg_does_not_become_zero_evidence(self) -> None:
         old = {
             "schema_version": 2,
