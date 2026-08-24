@@ -1,8 +1,9 @@
 """Vercel serverless adapter for the persisted FPL Engine website.
 
 This module contains no model logic. It reuses the existing Store, SiteCache and
-HTML renderer from ``src/fplengine`` and expects the production Neon connection
-string in ``FPLENGINE_DATABASE_URL``.
+HTML renderer from ``src/fplengine``. Production should provide a Neon connection
+string through ``FPLENGINE_DATABASE_URL``; ``NEON_DATABASE_URL`` and ``DATABASE_URL``
+are accepted as compatibility aliases for existing hosting setups.
 """
 
 from __future__ import annotations
@@ -22,7 +23,11 @@ if str(SRC) not in sys.path:
 from fplengine.storage import Store  # noqa: E402
 from fplengine.web import SiteCache, TABS, page  # noqa: E402
 
-_DATABASE_URL = os.environ.get("FPLENGINE_DATABASE_URL")
+_DATABASE_URL = (
+    os.environ.get("FPLENGINE_DATABASE_URL")
+    or os.environ.get("NEON_DATABASE_URL")
+    or os.environ.get("DATABASE_URL")
+)
 _ENTRY_ID = int(os.environ.get("FPLENGINE_ENTRY_ID", "7181076"))
 _TTL_SECONDS = int(os.environ.get("FPLENGINE_WEB_TTL", "900"))
 
@@ -59,7 +64,7 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if _CACHE is None:
             body = (
-                "FPL Engine is deployed but FPLENGINE_DATABASE_URL is not configured."
+                "FPL Engine is deployed but no Neon database URL is configured."
             ).encode("utf-8")
             self.send_response(HTTPStatus.SERVICE_UNAVAILABLE)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
