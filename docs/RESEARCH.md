@@ -2,6 +2,36 @@
 
 Research was refreshed on 2026-08-23 and favored primary/official sources.
 
+## Interval calibration (2026-08-24)
+
+Diagnosis from the split-transition artifact: starter undercoverage is a global
+upper-tail problem, not transition-specific. Starter coverage was 0.715 (2025/26) and
+0.747 (2024/25) with 20-25% of actuals above the upper bound versus only ~3% below,
+while all-player coverage stayed healthy because zeros dominate. Interval width was
+nearly uniform (~5.0) across cohorts, i.e. variance-dominated.
+
+Challenger: multiply only the distance from expected points to the upper bound.
+Means, ordering, minutes, lower bounds and reported risk are bit-invariant by
+construction (`src/fplengine/transition_uncertainty.py`). Grid over global upper
+factors {1.0, 1.25, 1.5, 2.0} x optional club-change extra {1.0, 1.5}.
+
+Results (starter coverage / mean width / share above upper):
+
+| Factor | 2025/26 | 2024/25 |
+|---|---|---|
+| 1.00 (baseline) | 0.715 / 5.03 / 24.5% | 0.747 / 5.12 / 20.4% |
+| 1.50 | 0.793 / 6.39 / 17.4% | 0.820 / 6.50 / 13.0% |
+| 2.00 | 0.857 / 7.74 / 11.0% | 0.869 / 7.87 / 8.2% |
+
+NDCG@10 is identical across every candidate in both seasons (0.4268 / 0.4471). The
+x2 factor lands closest to the ~0.85 two-sided target on both seasons; a targeted
+club-change extra adds little because the miscoverage is global.
+
+Status: validated challenger `xp-v0.3-interval-calibration` (artifacts
+`reports/interval_calibration_2025_26.json`, `reports/interval_calibration_2024_25.json`).
+Recommended follow-up: adopt as an uncertainty-only patch in the next production
+version bump; it changes no ranking output. Not silently folded into xp-v0.2.0.
+
 ## Split transition role decay (PR #18, 2026-08-24)
 
 Grid over club-change role-retention weight {0, 0.25, 0.5, 0.75, 1.0} x promoted-team
