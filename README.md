@@ -34,6 +34,9 @@ Python 3.11 or newer is required. The core engine has no third-party runtime dep
 
 ```powershell
 $env:PYTHONPATH = "src"
+python -m fplengine cockpit --limit 15
+python -m fplengine cockpit --player Haaland
+python -m fplengine cockpit --squad-file squad.json
 python -m fplengine rankings --limit 20
 python -m fplengine report --limit 10
 python -m fplengine run --limit 15
@@ -41,6 +44,15 @@ python -m fplengine elite --sample 25 --candidate-pool 75 --minimum-past-seasons
 python -m fplengine manager YOUR_PUBLIC_ENTRY_ID
 python -m unittest discover -v
 ```
+
+The cockpit is the pre-deadline decision brief: current fixtures, rankings with xP,
+xMins, risk and component attribution, captain candidates with ceilings, market
+movers, changes since the previous stored ingestion, and rules-valid squad/transfer
+optimisation. For a personal transfer plan, `squad.json` needs exactly 15
+`player_ids`, your `bank` in £ millions, and banked `free_transfers` (1-5), plus an
+optional `selling_prices` map. Run ingestion (`run`) at least twice on different days
+to enable the change-detection section. The optimizer requires the pulp dependency,
+which is installed by default with the package.
 
 To use the production Neon schema after configuring a safe replacement credential:
 
@@ -61,7 +73,8 @@ $env:PYTHONPATH = "src"
 python -m fplengine api --port 8000
 ```
 
-Routes are `/health`, `/rankings`, `/report`, and `/manager/{entry_id}`. The server binds
+Routes are `/health`, `/rankings`, `/report`, `/cockpit` (optional `?player=`
+and `?format=text`), `/player/{id_or_name}`, and `/manager/{entry_id}`. The server binds
 to `127.0.0.1` by default and has no authentication, so it must not be exposed directly
 to the public internet.
 

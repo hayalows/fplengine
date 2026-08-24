@@ -12,6 +12,7 @@ from typing import Any
 
 from .api_client import FPLAPIError, FPLClient
 from .benchmark import SeasonArchive, benchmark_season, write_benchmark_report
+from .cockpit import build_cockpit, render_text
 from .http_api import serve
 from .model import ExpectedPointsModel, Prediction
 from .priors import build_prior_payload, write_prior_payload
@@ -112,6 +113,28 @@ def command_rankings(args: argparse.Namespace) -> None:
 def command_report(args: argparse.Namespace) -> None:
     snapshot, predictions = _live(args)
     _json(build_report(snapshot, predictions, args.limit))
+
+
+def command_cockpit(args: argparse.Namespace) -> None:
+    client = FPLClient(
+        timeout_seconds=float(os.getenv("FPLENGINE_HTTP_TIMEOUT_SECONDS", "30")),
+        max_retries=int(os.getenv("FPLENGINE_HTTP_MAX_RETRIES", "3")),
+    )
+    store = Store(args.database_url)
+    store.initialize()
+    cockpit = build_cockpit(
+        client,
+        store,
+        entry_id=args.entry_id,
+        event=args.event,
+        limit=args.limit,
+        squad_file=Path(args.squad_file) if args.squad_file else None,
+        player_query=args.player,
+    )
+    if args.json:
+        _json(cockpit)
+    else:
+        print(render_text(cockpit))
 
 
 def command_manager(args: argparse.Namespace) -> None:
@@ -252,6 +275,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     report = subparsers.add_parser("report", parents=[common], help="Emit the full JSON decision report")
     report.set_defaults(func=command_report)
+
+    cockpit = subparsers.add_parser(
+        "cockpit", parents=[common], help="Assemble the gameweek decision brief"
+    )
+    cockpit.add_argument("--database-url")
+    cockpit.add_argument("--entry-id", type=int, help="Optional public entry for manager context")
+    cockpit.add_argument("--squad-file", help="JSON with player_ids(15), bank, free_transfers")
+    cockpit.add_argument("--player", help="Add a player detail section by id or name substring")
+    cockpit.add_argument("--json", action="store_true")
+    cockpit.set_defaults(func=command_cockpit)
 
     manager = subparsers.add_parser("manager", help="Analyse a public FPL entry")
     manager.add_argument("entry_id", type=int)
