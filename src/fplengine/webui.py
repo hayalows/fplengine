@@ -659,14 +659,23 @@ def _render_home(payload: dict[str, Any]) -> str:
 # MY TEAM
 # --------------------------------------------------------------------------
 
-def _formation_rows(players: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+def _formation_rows(
+    payload: dict[str, Any], players: list[dict[str, Any]]
+) -> list[list[dict[str, Any]]]:
+    """Group the starting XI into pitch rows using each player's real position."""
     starters = sorted(
         (row for row in players if row.get("role") == "starter"),
         key=lambda row: row["position_slot"],
     )
-    order = ("GK", "DEF", "MID", "FWD")
+    position_by_id = {
+        int(row.get("player_id")): str(row.get("position") or "")
+        for row in payload.get("all_players") or []
+    }
 
     def position_of(row: dict[str, Any]) -> str:
+        known = position_by_id.get(int(row.get("player_id")), "")
+        if known in ("GK", "DEF", "MID", "FWD"):
+            return known
         slot = row["position_slot"]
         if slot == 1:
             return "GK"
@@ -674,10 +683,9 @@ def _formation_rows(players: list[dict[str, Any]]) -> list[list[dict[str, Any]]]
             return "DEF"
         if 6 <= slot <= 10:
             return "MID"
-        if slot == 11:
-            return "FWD"
-        return "BENCH"
+        return "FWD"
 
+    order = ("GK", "DEF", "MID", "FWD")
     buckets: dict[str, list[dict[str, Any]]] = {key: [] for key in order}
     for row in starters:
         buckets.setdefault(position_of(row), []).append(row)
@@ -713,7 +721,7 @@ def _render_myteam(payload: dict[str, Any]) -> str:
             f"{_esc(team.get('error'))}</p></div>"
         )
     players = team.get("players") or []
-    formation = _formation_rows(players)
+    formation = _formation_rows(payload, players)
     pitch_rows = "".join(
         "<div class=row>" + "".join(_pitch_player_card(row) for row in group) + "</div>"
         for group in formation
@@ -923,7 +931,12 @@ def _render_transfers(payload: dict[str, Any]) -> str:
         )
     state_label = rec.get("state_label") or "APPROXIMATE"
     action = rec.get("action") or ""
-    chosen = rec.get("chosen_plan") or "roll"
+    chosen_by_action = {
+        "ROLL": "roll",
+        "TRANSFER (one)": "single",
+        "TRANSFER (two)": "double",
+    }
+    chosen = chosen_by_action.get(str(action), "roll")
     plans = {
         "roll": ("ROLL", next_gw.get("roll_plan") or {}, 0.0),
         "single": ("ONE", next_gw.get("best_single_transfer") or {},
@@ -945,7 +958,7 @@ def _render_transfers(payload: dict[str, Any]) -> str:
         panels.append(
             f'<div class="plan{" active" if active else ""}" id=plan-{key} role=tabpanel '
             f'aria-labelledby=t-{key}><div class=metrics>'
-            + _stat("projected", f"{plan.get('weighted_projected_points', 0):.2f}")
+            + _stat("projected", f"{plan.get('projected_points', 0):.2f}")
             + _stat("gain vs roll", _fmt_signed(gain, 2))
             + _stat("transfers used", str(len(ins)))
             + _stat("hit cost", f"{plan.get('hit_cost', 0)} pts")
@@ -1036,11 +1049,13 @@ def _render_captain(payload: dict[str, Any]) -> str:
             + "</div></div>"
         )
     selects = []
+    defaults = {"A": 1, "B": 2}
     for side in ("A", "B"):
+        default_rank = min(defaults[side], len(ids))
         options = "".join(
-            f'<option value="{rank}"{" selected" if rank == index else ""}>'
+            f'<option value="{rank}"{" selected" if rank == default_rank else ""}>'
             f"#{rank} {_esc(candidates[rank - 1]['name'])}</option>"
-            for index, rank in enumerate(ids, start=1)
+            for rank in ids
         )
         selects.append(
             f'<label class=sub>Captain {side}: <select id=cmp-{side}>{options}</select></label>'
@@ -1263,16 +1278,20 @@ _MARKET_SORTS = (
 )
 
 
-def _market_rows_for_page(payload: dict[str, Any], cap: int = 160) -> list[dict[str, Any]]:
+def _market_rows_for_page(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """All market rows; sections and the client list apply their own limits.
+
+    Truncating here would hide owned players from squad filters before the
+    client-side list ever sees them.
+    """
     market = payload.get("market") or {}
     if not market.get("available"):
         return []
-    rows = sorted(
+    return sorted(
         market.get("players") or [],
         key=lambda item: abs(item.get("net_transfers") or 0),
         reverse=True,
     )
-    return rows[:cap]
 
 
 def _render_market(payload: dict[str, Any]) -> str:
@@ -1336,16 +1355,20 @@ function keyOf(r){switch(sort.value){case 'velocity':
  return ({'VERY HIGH':4,'HIGH':3,'MEDIUM':2,'LOW':1})[r.pressure_level]||0;case 'price':
  return r.price||0;case 'ownership':return r.ownership_percent||0;default:
  return Math.abs(r.net_transfers||0);}}
-function card(r){var arrow=r.pressure_direction==='UP'?'\u2191':
- (r.pressure_direction==='DOWN'?'\u2193':'\u2192');
- var d24=(typeof r.d24==='number'&&r.d24!==0)?((r.d24>0?'+':'')+r.d24.toFixed(1)):'\u2013';
+function card(r){var dir=r.pressure_direction;
+ var arrow=dir==='UP'?'\u2191':(dir==='DOWN'?'\u2193':'\u2192');
+ var d24=r.price_change_24h;
+ var d24txt=(typeof d24==='number'&&d24!==0)?((d24>0?'+':'')+d24.toFixed(1)):'\u2013';
+ var v6=r.velocity_per_hour_6h;
+ var v6txt=(typeof v6==='number')?((v6>0?'+':'')+Math.round(v6).toLocaleString()):'\u2013';
+ var nt=(typeof r.net_transfers==='number')?
+  ((r.net_transfers>0?'+':'')+r.net_transfers.toLocaleString()):'\u2013';
  return '<div class=mcard><div><div class=nm>'+r.name+'</div><div class=sub>'+r.team+' '
  +r.position+'</div></div><div style=text-align:right>'+
- '<div class="num" style=font-weight:800>\u00a3'+r.price.toFixed(1)+'m '+d24+'</div>'+
- '<div class="sub num">'+(r.net_transfers>0?'+':'')+(r.net_transfers||0).toLocaleString()+' net GW</div>'+
- '<div class="sub num">6h '+((r.net_transfers_6h===null||r.net_transfers_6h===undefined)?
- '\u2013':((r.net_transfers_6h>0?'+':'')+r.net_transfers_6h.toLocaleString()))+'</div>'+
- '<span class="chip '+(r.pdir==='UP'?'up':(r.pdir==='DOWN'?'down':''))+'" title="'+
+ '<div class="num" style=font-weight:800>\u00a3'+Number(r.price).toFixed(1)+'m '+d24txt+'</div>'+
+ '<div class="sub num">'+nt+' net GW</div>'+
+ '<div class="sub num">6h '+v6txt+'</div>'+
+ '<span class="chip '+(dir==='UP'?'up':(dir==='DOWN'?'down':''))+'" title="'+
  window.FPL_NOTE+'">PRESSURE '+arrow+' '+r.pressure_level+'</span></div></div>';}
 function render(){
  var rows=R.filter(function(r){
@@ -1426,7 +1449,16 @@ def _typed_changes(payload: dict[str, Any]) -> list[dict[str, str]]:
             row["player_id"]: row.get("name") or f"#{row['player_id']}"
             for row in market.get("players") or []
         }
-        events.extend(market_events(market, names, limit=40))
+        for event in market_events(market, names, limit=40):
+            # market_events() emits timestamp-keyed records; normalize to the
+            # time/detail shape this feed renders.
+            events.append(
+                {
+                    "type": str(event.get("type") or "MARKET"),
+                    "time": str(event.get("timestamp") or "")[:16].replace("T", " "),
+                    "detail": str(event.get("detail") or ""),
+                }
+            )
     return events
 
 

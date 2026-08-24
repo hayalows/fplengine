@@ -55,6 +55,82 @@ class RenderTests(unittest.TestCase):
         self.assertIn("Gameweek status", html)
         return html
 
+    def test_changes_feed_normalizes_market_event_schema(self) -> None:
+        self.payload["market"] = {
+            "available": True,
+            "captured_at": "2026-08-30T11:50:00+00:00",
+            "players": [
+                {
+                    "player_id": 1,
+                    "name": "Star",
+                    "price": 7.2,
+                    "net_transfers": 50000,
+                    "net_transfers_6h": 20000,
+                    "velocity_per_hour_6h": 3636.0,
+                    "ownership_percent": 42.0,
+                    "pressure_direction": "UP",
+                    "pressure_level": "HIGH",
+                    "status": "a",
+                    "news": "",
+                }
+            ],
+        }
+        html = page("changes", self.payload)
+        self.assertIn("TRANSFER SURGE", html)
+
+    def test_transfers_panel_defaults_follow_recommendation_action(self) -> None:
+        next_gw = {
+            "roll_plan": {"projected_points": 40.0, "transfers_in": [], "transfers_out": []},
+            "best_single_transfer": {
+                "projected_points": 41.0,
+                "transfers_in": ["In"],
+                "transfers_out": ["Out"],
+            },
+            "best_two_transfer": {
+                "projected_points": 43.5,
+                "transfers_in": ["A", "B"],
+                "transfers_out": ["C", "D"],
+            },
+            "recommendation": {
+                "action": "TRANSFER (two)",
+                "reason": "test",
+                "gain_single_over_roll": 1.0,
+                "gain_double_over_roll": 3.5,
+                "best_gain_over_roll": 3.5,
+                "state_label": "APPROXIMATE",
+                "recommended_plan": {"projected_points": 43.5},
+            },
+        }
+        payload = dict(self.payload)
+        payload["next_gw"] = next_gw
+        html = page("transfers", payload)
+        # The TWO panel is the visible one because the recommendation says two.
+        self.assertIn('id=plan-double', html.replace('"', "").replace("'", "") or 'id=plan-double')
+        self.assertIn('class="plan active" id=plan-double', html)
+        self.assertIn("43.50", html)
+
+    def test_captain_head_to_head_defaults_are_distinct(self) -> None:
+        html = page("captain", self.payload)
+        self.assertIn('<option value="1" selected>', html)
+        self.assertIn('<option value="2" selected>', html)
+
+    def test_pitch_rows_group_by_real_positions(self) -> None:
+        from fplengine import webui
+
+        all_players = [
+            {"player_id": pid, "position": pos}
+            for pid, pos in zip(
+                [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+                ["GK", "DEF", "DEF", "DEF", "MID", "MID", "MID", "MID", "FWD", "FWD", "FWD"],
+            )
+        ]
+        players = [
+            {"player_id": pid, "position_slot": slot, "role": "starter"}
+            for slot, pid in enumerate(range(1, 12), start=1)
+        ]
+        rows = webui._formation_rows({"all_players": all_players}, players)
+        self.assertEqual([len(group) for group in rows], [1, 3, 4, 3])
+
 
 class SiteServerTests(unittest.TestCase):
     @classmethod
