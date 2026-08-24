@@ -15,7 +15,7 @@ from typing import Any
 from .api_client import Snapshot
 from .model import ExpectedPointsModel, Prediction
 from .optimizer import optimize_static_squad, optimize_transfers
-from .rules import MAX_BANKED_FREE_TRANSFERS
+from .rules import MAX_BANKED_FREE_TRANSFERS, next_free_transfers
 from .service import build_report, latest_public_picks_event
 
 
@@ -183,6 +183,102 @@ def _load_squad_file(path: Path) -> dict[str, Any]:
 ROLL_GAIN_THRESHOLD = 0.8
 
 
+def reconstruct_free_transfer_balance(
+    current_rows: list[dict[str, Any]],
+    chips: list[Any] | None = None,
+) -> dict[str, Any]:
+    """Replay the season's transfer ledger under 2026/27 carry/banking rules.
+
+    Starts from one free transfer before GW1 and applies ``next_free_transfers``
+    after every finished gameweek in chronological order, so saved transfers roll
+    forward (capped at five), used transfers are consumed first, and hits simply
+    leave the balance at its floor. The result is only unambiguous when the stored
+    history is contiguous from event 1 and no chips were used: Free Hit/Wildcard
+    interactions and post-deadline activity cannot be observed publicly. Ambiguous
+    ledgers still return the replayed balance as a best guess for transparency,
+    but callers must treat it as APPROXIMATED/UNKNOWN.
+    """
+    balance = 1
+    previous_event: int | None = None
+    contiguous = True
+    for row in sorted(current_rows, key=lambda item: int(item.get("event") or 0)):
+        event = int(row.get("event") or 0)
+        if previous_event is None:
+            contiguous = contiguous and event == 1
+        else:
+            contiguous = contiguous and event == previous_event + 1
+        used = max(0, int(row.get("event_transfers") or 0))
+        balance = next_free_transfers(balance, used)
+        previous_event = event
+    unambiguous = bool(current_rows) and contiguous and not chips
+    return {
+        "balance": balance if current_rows else None,
+        "unambiguous": unambiguous,
+        "replayed_gameweeks": len(current_rows),
+    }
+
+
+def decide_roll_or_transfer(
+    *,
+    roll_projection: float,
+    single_projection: float,
+    double_projection: float,
+    threshold: float = ROLL_GAIN_THRESHOLD,
+) -> dict[str, Any]:
+    """Choose ROLL / one transfer / two transfers using total net gains over rolling.
+
+    Every candidate is compared directly against the do-nothing projection; the
+    second transfer is never judged only against the single-transfer plan when
+    deciding whether rolling wins.
+    """
+    gain_single = round(single_projection - roll_projection, 3)
+    gain_double = round(double_projection - roll_projection, 3)
+    best_gain = round(max(gain_single, gain_double), 3)
+    result: dict[str, Any] = {
+        "gain_single_over_roll": gain_single,
+        "gain_double_over_roll": gain_double,
+        "best_gain_over_roll": best_gain,
+    }
+    if best_gain <= threshold:
+        result.update(
+            {
+                "action": "ROLL",
+                "chosen_plan": "roll",
+                "reason": (
+                    f"best transfer plan gains only {best_gain:.2f} points net over "
+                    f"rolling; keeping the free transfer(s) is worth more"
+                ),
+            }
+        )
+        return result
+    single_justified = gain_single > threshold
+    double_margin = gain_double - gain_single
+    if single_justified and double_margin <= 1.0:
+        # The one-transfer plan already clears the roll bar and the second move adds
+        # little beyond it; avoid unnecessary churn.
+        result.update(
+            {
+                "action": "TRANSFER (one)",
+                "chosen_plan": "single",
+                "reason": f"a single transfer gains {gain_single:.2f} points net over rolling",
+            }
+        )
+        return result
+    result.update(
+        {
+            "action": "TRANSFER (two)",
+            "chosen_plan": "double",
+            "reason": (
+                f"two transfers gain {gain_double:.2f} points net over rolling "
+                f"({double_margin:+.2f} beyond the single-transfer plan)"
+                if double_margin > 0
+                else f"two transfers gain {gain_double:.2f} points net over rolling"
+            ),
+        }
+    )
+    return result
+
+
 def build_personal_sections(
     client: Any,
     snapshot: Snapshot,
@@ -244,22 +340,25 @@ def build_personal_sections(
     if selling_prices_file is not None:
         raw = json.loads(selling_prices_file.read_text(encoding="utf-8"))
         selling_prices = {int(key): float(value) for key, value in raw.items()}
+    owned_ids = {int(pick["element"]) for pick in picks}
+    prices_cover_squad = bool(selling_prices) and owned_ids.issubset(selling_prices.keys())
 
     bank_reconstructed = (
         float(latest_history["bank"]) / 10.0
         if latest_history.get("bank") is not None
         else None
     )
-    last_event_transfers = int(latest_history.get("event_transfers") or 0)
-    free_transfers_estimate = min(MAX_BANKED_FREE_TRANSFERS, 1 + max(0, 1 - last_event_transfers)) \
-        if current_rows else 1
+    chips_used = history.get("chips") or []
+    ft_reconstruction = reconstruct_free_transfer_balance(current_rows, chips_used)
     effective_bank = (
         float(bank_override) if bank_override is not None else (
             bank_reconstructed if bank_reconstructed is not None else 0.0
         )
     )
     effective_free_transfers = int(
-        free_transfers_override if free_transfers_override is not None else free_transfers_estimate
+        free_transfers_override
+        if free_transfers_override is not None
+        else (ft_reconstruction["balance"] or 1)
     )
     manager_state = {
         "squad_and_lineup": {
@@ -278,17 +377,33 @@ def build_personal_sections(
         "free_transfers": {
             "value": effective_free_transfers,
             "classification": (
-                "USER-SUPPLIED" if free_transfers_override is not None else "APPROXIMATED"
+                "USER-SUPPLIED" if free_transfers_override is not None
+                else "RECONSTRUCTED" if ft_reconstruction["unambiguous"]
+                else "APPROXIMATED"
             ),
-            "note": f"inferred as saved after {last_event_transfers} transfer(s); banking cannot be observed publicly",
+            "note": (
+                f"chronological replay of {ft_reconstruction['replayed_gameweeks']} finished "
+                f"gameweek(s) under carry rules (cap {MAX_BANKED_FREE_TRANSFERS})"
+                if ft_reconstruction["unambiguous"]
+                else "ledger incomplete or chip activity present; balance not publicly derivable"
+            ),
         },
         "selling_prices": {
-            "value": "current prices" if not selling_prices else "supplied map",
-            "classification": "APPROXIMATED" if not selling_prices else "USER-SUPPLIED",
-            "note": "true FPL selling price (half-profit rule) needs purchase history",
+            "value": (
+                f"supplied map covers {len(set(selling_prices) & owned_ids)}/{len(owned_ids)} owned players"
+                if selling_prices else "current prices"
+            ),
+            "classification": (
+                "USER-SUPPLIED" if prices_cover_squad else "APPROXIMATED"
+            ),
+            "note": (
+                "exact FPL selling prices for every owned player"
+                if prices_cover_squad
+                else "partial or missing map; plans default sale value to current price"
+            ),
         },
         "chips": {
-            "value": history.get("chips") or [],
+            "value": chips_used,
             "classification": "VERIFIED (used chips only); remaining chip state NOT YET MODELLED",
         },
     }
@@ -416,29 +531,25 @@ def build_personal_sections(
         }
 
     roll_projection = roll_plan.weighted_projected_points
-    gain_one = plan_one.weighted_projected_points - roll_projection
-    gain_two = plan_two.weighted_projected_points - plan_one.weighted_projected_points
-    if gain_one <= roll_gain_threshold and gain_two <= roll_gain_threshold:
-        recommendation = {
-            "action": "ROLL",
-            "reason": (
-                f"best transfer plan gains only {max(gain_one, gain_two + gain_one - gain_one):.2f} "
-                f"points net; keeping the free transfer is worth more"
-            ),
-            "recommended_plan": plan_view(roll_plan),
-        }
-    elif plan_two.weighted_projected_points > plan_one.weighted_projected_points + 1.0:
-        recommendation = {
-            "action": "TRANSFER (two)",
-            "reason": f"second transfer adds {gain_two:.2f} points beyond the first",
-            "recommended_plan": plan_view(plan_two),
-        }
-    else:
-        recommendation = {
-            "action": "TRANSFER (one)",
-            "reason": f"single transfer gains {gain_one:.2f} points net over rolling",
-            "recommended_plan": plan_view(plan_one),
-        }
+    decision = decide_roll_or_transfer(
+        roll_projection=roll_projection,
+        single_projection=plan_one.weighted_projected_points,
+        double_projection=plan_two.weighted_projected_points,
+        threshold=roll_gain_threshold,
+    )
+    chosen_plan = {
+        "roll": plan_view(roll_plan),
+        "single": plan_view(plan_one),
+        "double": plan_view(plan_two),
+    }[decision["chosen_plan"]]
+    recommendation = {
+        "action": decision["action"],
+        "reason": decision["reason"],
+        "gain_single_over_roll": decision["gain_single_over_roll"],
+        "gain_double_over_roll": decision["gain_double_over_roll"],
+        "best_gain_over_roll": decision["best_gain_over_roll"],
+        "recommended_plan": chosen_plan,
+    }
     approximate = any(
         manager_state[field]["classification"] != "USER-SUPPLIED"
         for field in ("bank", "free_transfers", "selling_prices")
@@ -449,7 +560,7 @@ def build_personal_sections(
         "target_event": event_id,
         "roll_plan": plan_view(roll_plan),
         "best_single_transfer": plan_view(plan_one),
-        "gain_over_roll_net_of_hits": round(gain_one, 3),
+        "gain_over_roll_net_of_hits": decision["gain_single_over_roll"],
         "best_two_transfer": plan_view(plan_two),
         "recommendation": recommendation,
         "possible_sells": [
