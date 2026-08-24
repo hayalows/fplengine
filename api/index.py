@@ -20,6 +20,11 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+# Vercel's import UI can materialize detected optional variables as empty strings.
+# Treat a blank schema as unset so Store can use the production default safely.
+if not os.environ.get("FPLENGINE_DB_SCHEMA", "").strip():
+    os.environ["FPLENGINE_DB_SCHEMA"] = "engine"
+
 from fplengine.storage import Store  # noqa: E402
 from fplengine.web import SiteCache, TABS, page  # noqa: E402
 
