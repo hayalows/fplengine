@@ -25,10 +25,16 @@ def run_once(database_url: str | None = None) -> dict[str, Any]:
 
     ingestion_id, inserted = store.save_snapshot(snapshot)
     # Persist official gameweek metadata (deadlines) so read paths can show
-    # countdowns without any page-load call to the FPL API.
-    store.save_season_events(
-        snapshot.bootstrap.get("events") or [], snapshot.fetched_at.isoformat()
-    )
+    # countdowns without any page-load call to the FPL API. This is optional
+    # enrichment: if the season_event table has not been deployed yet, core
+    # observation/prediction ingestion must still succeed.
+    try:
+        store.save_season_events(
+            snapshot.bootstrap.get("events") or [], snapshot.fetched_at.isoformat()
+        )
+        events_status = "ok"
+    except Exception as exc:  # noqa: BLE001 - metadata must never break ingestion
+        events_status = f"skipped: {type(exc).__name__}: {exc}"
     prediction_run_id = store.save_predictions(ingestion_id, snapshot, predictions)
     return {
         "status": "ok",
@@ -42,6 +48,7 @@ def run_once(database_url: str | None = None) -> dict[str, Any]:
         "ingestion_run_id": ingestion_id,
         "prediction_run_id": prediction_run_id,
         "new_source_snapshot": inserted,
+        "season_events": events_status,
     }
 
 
