@@ -12,7 +12,10 @@ that never relies on colour alone, tabular numerals and restrained motion.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from html import escape
+
+_EM_DASH = "\u2013"
 from typing import Any
 
 ROUTES = (
@@ -41,7 +44,7 @@ _ICONS = {
 _STYLE = """<!doctype html><html lang=en><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name=theme-color content="#000000">
-<title>FPL Engine</title><style>
+<style>
 :root{
 --bg:#000000;
 --surface:#1c1c1e;
@@ -52,7 +55,7 @@ _STYLE = """<!doctype html><html lang=en><head><meta charset=utf-8>
 --sep:rgba(255,255,255,.08);
 --text:#f5f5f7;
 --muted:rgba(235,235,245,.62);
---faint:rgba(235,235,245,.34);
+--faint:rgba(235,235,245,.45);
 --accent:#30d158;
 --cyan:#64d2ff;
 --up:#30d158;
@@ -102,7 +105,7 @@ color:var(--faint);font-size:.58rem;font-weight:600;letter-spacing:.02em;backgro
 border:none;cursor:pointer;padding:.3rem .6rem;border-radius:12px;min-width:60px;
 font-family:inherit;transition:color .2s var(--ease),transform .15s var(--ease)}
 nav.bottom svg{width:22px;height:22px}
-nav.bottom a[aria-current]{color:var(--accent)}
+nav.bottom a[aria-current]{color:var(--accent);background:rgba(48,209,88,.14)}
 nav.bottom a:active,nav.bottom button:active{transform:scale(.92)}
 .sheet,.drawer{transition:opacity .25s var(--ease)}
 .sheet .veil,.drawer .veil{opacity:0;transition:opacity .28s var(--ease)}
@@ -158,11 +161,11 @@ animation:pulse 2.4s var(--ease) infinite}
 @keyframes pulse{50%{box-shadow:0 0 2px rgba(48,209,88,.4)}}
 .dot.stale{background:var(--warn)}.dot.old{background:var(--down)}
 .stat .v{font-size:1.06rem;font-weight:700;letter-spacing:-.02em}
-.stat .k{font-size:.66rem;color:var(--faint);font-weight:500;margin-top:1px}
+.stat .k{font-size:.7rem;color:var(--muted);font-weight:500;margin-top:1px}
 .upC{color:var(--up)}.downC{color:var(--down)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:.35rem;
-padding:.52rem 1rem;border-radius:12px;border:none;background:var(--fill);
-color:var(--text);font-weight:600;font-size:.85rem;cursor:pointer;font-family:inherit;
+min-height:44px;padding:.52rem 1rem;border-radius:12px;border:none;background:var(--fill);
+color:var(--text);font-weight:600;font-size:.95rem;cursor:pointer;font-family:inherit;
 transition:transform .18s var(--ease),background .18s var(--ease),opacity .15s ease;
 -webkit-tap-highlight-color:transparent}
 .btn:hover{background:var(--fill2)}
@@ -195,8 +198,10 @@ details .inside{padding:.1rem 1.1rem 1.05rem}
 letter-spacing:.08em;text-transform:uppercase}
 .hero .gw{font-size:2.9rem;font-weight:800;letter-spacing:-.04em;line-height:1.02;
 margin-top:.1rem}
-.countdown{font-weight:700;font-size:1.02rem;letter-spacing:-.01em;margin-top:.35rem;
+.countdown{font-weight:700;font-size:1.25rem;letter-spacing:-.01em;margin-top:.4rem;
 color:var(--text)}
+.countdown.soon{color:var(--warn)}
+.countdown.now{color:var(--down);animation:pulse 1.6s var(--ease) infinite}
 .hero-status{display:flex;flex-direction:column;gap:.42rem;align-items:flex-end}
 .statusline{display:inline-flex;align-items:center;gap:.42rem;color:var(--muted);
 font-size:.8rem;font-weight:500}
@@ -207,7 +212,7 @@ margin:.45rem 0 .1rem}
 .tcard{flex:1 1 132px;background:var(--surface2);border-radius:14px;
 padding:.65rem .75rem;min-width:122px}
 .tcard .cl{color:var(--accent);font-size:.64rem;font-weight:700;letter-spacing:.09em}
-.tcard.out .cl{color:var(--down)}
+.tcard.out .cl{color:#ff8d84}
 .tcard .nm{font-weight:700;font-size:.98rem;letter-spacing:-.01em;margin-top:2px}
 .tcard .sub{font-size:.73rem}
 .tcard .xp{font-size:.95rem;font-weight:700;margin-top:.3rem}
@@ -255,8 +260,8 @@ padding:.4rem 1.15rem calc(1.6rem + env(safe-area-inset-bottom));transform:trans
 width:430px;border-radius:22px;transform:translateX(24px);opacity:0;
 transition:transform .38s var(--ease),opacity .3s var(--ease)}
 .drawer.open .panel{transform:translateX(0);opacity:1}}
-.dclose{float:right;background:var(--fill);border:none;color:var(--muted);width:30px;
-height:30px;border-radius:50%;font-size:1.15rem;cursor:pointer;line-height:1;
+.dclose{float:right;background:var(--fill);border:none;color:var(--muted);width:44px;
+height:44px;border-radius:50%;font-size:1.25rem;cursor:pointer;line-height:1;
 margin-left:.5rem;transition:transform .18s var(--ease)}
 .dclose:active{transform:scale(.9)}
 .kv{display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem .8rem;margin:.75rem 0}
@@ -268,7 +273,7 @@ color:var(--muted);font-size:.87rem;margin-top:.7rem;line-height:1.5}
 .seg{display:flex;background:var(--fill);border-radius:12px;padding:.22rem;gap:.2rem;
 margin:.6rem 0}
 .seg button{flex:1;border:none;background:transparent;color:var(--muted);font-weight:600;
-padding:.5rem .4rem;border-radius:9.5px;cursor:pointer;font-size:.83rem;
+min-height:44px;padding:.5rem .4rem;border-radius:9.5px;cursor:pointer;font-size:.9rem;
 font-family:inherit;transition:background .25s var(--ease),color .25s var(--ease),
 transform .15s var(--ease)}
 .seg button:active{transform:scale(.96)}
@@ -288,12 +293,18 @@ button.mcard:active{transform:scale(.97)}
 .mcard .nm{font-weight:600;font-size:.93rem;letter-spacing:-.01em}
 .mcard .sub{font-size:.71rem}
 .toolbar{display:flex;gap:.5rem;flex-wrap:wrap;margin:.5rem 0 .9rem}
-.toolbar input,.toolbar select{background:var(--surface);border:none;color:var(--text);
-border-radius:12px;padding:.5rem .65rem;font-size:.86rem;font-family:inherit;
+.toolbar input,.toolbar select,.sel{background:var(--surface);border:none;color:var(--text);
+border-radius:12px;min-height:44px;padding:.55rem .7rem;font-size:16px;font-family:inherit;
 appearance:none;-webkit-appearance:none}
+.toolbar select,.sel{padding-right:1.7em;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2393a2b1' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+background-repeat:no-repeat;background-position:right .6rem center}
+.chip.tappable{min-height:44px;display:inline-flex;align-items:center}
 .toolbar input[type=search]{flex:1 1 150px}
 .feeditem{display:flex;gap:.75rem;padding:.65rem 0;border-bottom:.5px solid var(--sep)}
 .feeditem:last-child{border-bottom:none}
+.feedtime{flex:0 0 auto;min-width:88px;color:var(--faint);font-size:.72rem;
+font-variant-numeric:tabular-nums;padding-top:.18rem}
+[data-ev].on{background:var(--fill2);color:var(--text)}
 .comparebar{position:fixed;left:50%;transform:translateX(-50%) translateY(80px);
 bottom:calc(76px + env(safe-area-inset-bottom));z-index:55;
 background:rgba(44,44,46,.92);backdrop-filter:blur(20px) saturate(180%);
@@ -301,10 +312,23 @@ border-radius:16px;padding:.55rem .85rem;display:flex;gap:.6rem;align-items:cent
 box-shadow:0 10px 34px rgba(0,0,0,.5);opacity:0;pointer-events:none;
 transition:transform .35s var(--ease),opacity .3s var(--ease)}
 .comparebar.show{transform:translateX(-50%) translateY(0);opacity:1;pointer-events:auto}
+.comparebar{max-width:min(92vw,430px)}
+.comparebar #clist{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.cmp-open{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
 @media(min-width:920px){.comparebar{bottom:1.3rem}}
 .legendrow{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-</style></head><body>"""
+.skel{border-radius:15px;background:linear-gradient(100deg,var(--surface2) 40%,var(--raised) 50%,var(--surface2) 60%);background-size:200% 100%;animation:shimmer 1.2s linear infinite;min-height:72px}
+@keyframes shimmer{to{background-position:-200% 0}}
+.scrollx{-webkit-mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 14px),transparent);mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 14px),transparent)}
+.kv-h{font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:.95rem 0 .15rem;font-weight:600}
+@media(max-width:479px){.cols-trim th:nth-child(4),.cols-trim td:nth-child(4),
+.cols-trim th:nth-child(7),.cols-trim td:nth-child(7){display:none}}
+.filters{display:flex;gap:.5rem;overflow-x:auto;flex-wrap:nowrap;
+scroll-snap-type:x proximity;padding-bottom:.25rem;scrollbar-width:none}
+.filters::-webkit-scrollbar{display:none}
+.filters>*{flex:0 0 auto;scroll-snap-align:start}
+</style>"""
 
 
 def _icon(key: str) -> str:
@@ -387,7 +411,37 @@ MARKET_PRESSURE_NOTE = (
 )
 
 
+_ROUTE_DESCRIPTIONS = {
+    "home": "Your gameweek command center: next move, captain pick, price watch and what changed.",
+    "myteam": "Your squad on the pitch: projections, availability and provenance for every player.",
+    "transfers": "Roll, one transfer or two? Compare plans with exact hit costs and gains.",
+    "market": "Who is rising, who is falling: prices, ownership swings and transfer velocity.",
+    "players": "Search, filter and compare every player's projected output.",
+    "captain": "Pick your captain from modelled ceilings, minutes and risk.",
+    "changes": "A chronological feed of prices, news, ownership surges and transfer pressure.",
+    "fixtures": "Upcoming fixtures with kickoff times and results.",
+    "premier": "Team strength ratings and match probabilities from the walk-forward model.",
+    "model": "How FPL Engine works: provenance, methodology and known limitations.",
+}
+
+_FAVICON = (
+    "data:image/svg+xml,"
+    "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E"
+    "%3Crect width='32' height='32' rx='8' fill='%230a0e14'/%3E"
+    "%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%2330d158' stroke-width='2.5'/%3E"
+    "%3Cpath d='M16 7v18M7 16h18' stroke='%2330d158' stroke-width='1.4' opacity='.55'/%3E"
+    "%3C/svg%3E"
+)
+
+
 def _shell(route: str, body_html: str, model_version: str = "") -> str:
+    title = "FPL Engine · " + ROUTE_TITLES.get(route, "Home")
+    description = _ROUTE_DESCRIPTIONS.get(route, _ROUTE_DESCRIPTIONS["home"])
+    head_tags = (
+        "<title>" + _esc(title) + "</title>"
+        '<meta name="description" content="' + _esc(description) + '">'
+        '<link rel="icon" href="' + _FAVICON + '">'
+    )
     primary_links = "".join(
         f'<a href="/site/{key}"{_active(route, key)}>{_icon(key)}<span>{_esc(label)}</span></a>'
         for key, label in ROUTES
@@ -416,16 +470,18 @@ sheet.addEventListener('click',function(e){
 var cd=document.getElementById('countdown');
 if(cd&&cd.dataset.deadline){var dl=new Date(cd.dataset.deadline);
  function tick(){var d=dl-new Date();if(isNaN(d)){cd.textContent='';return;}
-  if(d<=0){cd.textContent='deadline passed';return;}
+  if(d<=0){cd.textContent='deadline passed';cd.classList.add('now');return;}
   var s=Math.floor(d/1000),dd=Math.floor(s/86400),h=Math.floor(s%86400/3600),
   m=Math.floor(s%3600/60),sec=s%60;
   cd.textContent=(dd?dd+'d ':'')+h+'h '+String(m).padStart(2,'0')+'m '
-  +String(sec).padStart(2,'0')+'s';}
+  +String(sec).padStart(2,'0')+'s';
+  cd.classList.toggle('soon',d<7200000&&d>=1800000);
+  cd.classList.toggle('now',d<1800000);}
  tick();setInterval(tick,1000);}
 })();
 """
     return (
-        f"{_STYLE}<header class=top><div class=\"logo\">FPL<span>ENGINE</span></div>"
+        f"{_STYLE}{head_tags}</head><body><header class=top><div class=\"logo\">FPL<span>ENGINE</span></div>"
         f"<span class=\"chip info\">{_esc(model_version)}</span><nav>{desktop_links}</nav></header>"
         f"<main>{body_html}</main>"
         f"<footer>FPL Engine &middot; decisions before deadlines &middot; "
@@ -546,28 +602,60 @@ def _transfer_card(record: dict[str, Any] | None, direction: str) -> str:
     )
 
 
-def _move_cards(payload: dict[str, Any], ins: list[str], outs: list[str]) -> str:
+def _move_cards(
+    payload: dict[str, Any],
+    ins: list[str],
+    outs: list[str],
+    hit_cost: int | None = None,
+) -> str:
+    """Sell-first transfer pairs: managers think OUT then IN.
+
+    Money context comes from persisted records so each pair shows the bank
+    impact; an optional chip appears when the plan includes a point hit.
+    """
     index = _player_index(payload)
     pairs = max(len(ins), len(outs))
     if not pairs:
-        return '<p class=sub style=margin:.4rem 0>No transfers - squad stays as it is.</p>'
+        return '<p class=sub style="margin:.4rem 0">No transfers - squad stays as it is.</p>'
     cards = []
     for index_num in range(pairs):
         in_name = ins[index_num] if index_num < len(ins) else None
         out_name = outs[index_num] if index_num < len(outs) else None
-        in_card = _transfer_card(index.get(str(in_name or "").lower()), "IN")
-        out_card = _transfer_card(index.get(str(out_name or "").lower()), "OUT")
-        arrow = '<span class=arrow>&rarr;</span>' if in_card and out_card else ""
-        cards.append(f"<div class=movecards>{in_card}{arrow}{out_card}</div>")
+        in_rec = index.get(str(in_name or "").lower())
+        out_rec = index.get(str(out_name or "").lower())
+        sell_card = _transfer_card(out_rec, "SELL")
+        buy_card = _transfer_card(in_rec, "BUY")
+        arrow = '<span class=arrow>&rarr;</span>' if sell_card and buy_card else ""
+        money = ""
+        if isinstance(in_rec, dict) and isinstance(out_rec, dict):
+            # delta = buy - sell: spending more than received lowers bank.
+
+            in_price = in_rec.get("price")
+            out_price = out_rec.get("price")
+            if isinstance(in_price, (int, float)) and isinstance(out_price, (int, float)):
+                delta = round(in_price - out_price, 1)
+                money = (
+                    f'<div class="chip {"warn" if delta > 0 else ""}" '
+                    'style="align-self:center">'
+                    f"{'+-'[delta > 0]}&pound;{abs(delta):.1f}m bank</div>"
+                )
+        cards.append(f"<div class=movecards>{sell_card}{arrow}{buy_card}{money}</div>")
+    if isinstance(hit_cost, int) and hit_cost > 0:
+        cards.append(
+            f'<div class="chip warn" style="align-self:flex-start">'
+            f"{hit_cost}-point hit included</div>"
+        )
     return "".join(cards)
 
 
-def _plan_ins_outs(payload: dict[str, Any], plan: dict[str, Any]) -> str:
+def _plan_ins_outs(
+    payload: dict[str, Any], plan: dict[str, Any], hit_cost: int | None = None
+) -> str:
     ins = plan.get("transfers_in") or []
     outs = plan.get("transfers_out") or []
     if not ins and not outs:
         return '<p class=sub>No transfers - the squad stays exactly as it is.</p>'
-    return _move_cards(payload, list(ins), list(outs))
+    return _move_cards(payload, list(ins), list(outs), hit_cost)
 
 
 def _next_move_card(payload: dict[str, Any]) -> str:
@@ -596,13 +684,16 @@ def _next_move_card(payload: dict[str, Any]) -> str:
         f"{provenance}</div>"
         f'<div class="action-word {action_css}" style=margin-top:.35rem>'
         f"{_esc(rec.get('action'))}</div>"
-        f'<div class=movecards>{_plan_ins_outs(payload, plan)}</div>'
+        f'<div class=movecards>{_plan_ins_outs(payload, plan, plan.get("hit_cost"))}</div>'
         '<div class=metrics>'
-        + _stat("gain vs roll", _fmt_signed(gain, 2))
+        + _stat("gain vs roll", _fmt_signed(gain, 2, " pts"))
         + _stat("hit cost", f"{plan.get('hit_cost', 0)} pts")
         + _stat("free transfers", _esc(ft_value))
         + _stat("bank", f"&pound;{_esc(bank_value)}")
-        + "</div>" + details + "</div>"
+        + "</div>"
+        + '<a class="btn primary" href="/site/transfers" '
+        'style="width:100%;margin-top:.9rem">Open the plan builder</a>'
+        + details + "</div>"
     )
 
 
@@ -681,7 +772,7 @@ def _price_watch_card(payload: dict[str, Any]) -> str:
         f'<span class=sub>{_esc(market.get("captured_at"))}</span></div>'
         '<div class=scrollx><table><thead><tr><th>Player</th><th>Price</th>'
         f"<th>Net 6h</th><th>Pressure</th></tr></thead><tbody>{table_rows}</tbody></table></div>"
-        '<p style=margin:.5rem 0 0><a class=btn href=/site/market>Full market</a></p></div>'
+        '<p style="margin:.5rem 0 0"><a class=btn href=/site/market>Full market</a></p></div>'
     )
 
 
@@ -731,7 +822,7 @@ def _changes_home_card(payload: dict[str, Any]) -> str:
     return (
         '<div class=card><h2>What changed</h2>'
         f"{feed}"
-        '<p style=margin:.5rem 0 0><a class=btn href=/site/changes>Full feed</a></p></div>'
+        '<p style="margin:.5rem 0 0"><a class=btn href=/site/changes>Full feed</a></p></div>'
     )
 
 
@@ -762,7 +853,7 @@ def _render_home(payload: dict[str, Any]) -> str:
         + _changes_home_card(payload)
         + "</div>"
         + f'<details><summary>Top picks this gameweek<span class=sub>engine ranking</span></summary>'
-        + '<div class=inside><div class=scrollx><table><thead><tr><th>#</th><th>Player</th>'
+        + '<div class="inside"><div class="scrollx cols-trim"><table><thead><tr><th>#</th><th>Player</th>'
         "<th>Team</th><th>Price</th><th>xP</th><th>xMins</th><th>Own%</th></tr></thead>"
         f"<tbody>{picks_rows}</tbody></table></div></div></details>"
         + ('<details><summary>Differentials<span class=sub>low ownership upside</span></summary>'
@@ -814,7 +905,7 @@ def _pitch_player_card(row: dict[str, Any]) -> str:
     elif row.get("is_vice_captain"):
         badge = '<span class=cbadge>V</span>'
     status_flag = "" if (row.get("availability_status") or "a") == "a" else \
-        '<span class="chip bad" style=padding:0 .25rem>!</span>'
+        '<span class="chip bad" style="padding:0 .25rem">!</span>'
     xp = row.get("expected_points")
     mins = row.get("expected_minutes")
     metrics = (
@@ -832,8 +923,12 @@ def _render_myteam(payload: dict[str, Any]) -> str:
     team = payload.get("my_team") or {}
     if "error" in team:
         return _hero(payload) + (
-            f'<div class=card style=margin-top:1rem><p class=sub>'
-            f"{_esc(team.get('error'))}</p></div>"
+            '<div class=card style="margin-top:1rem">'
+            "<h2 style=margin-top:0>We couldn't load your squad</h2>"
+            "<p class=sub>Your other tabs still work. This usually fixes itself "
+            "within a few minutes - official endpoints are briefly unavailable.</p>"
+            '<a class="btn primary" href="" onclick="location.reload();return:false">'
+            "Try again</a></div>"
         )
     players = team.get("players") or []
     formation = _formation_rows(payload, players)
@@ -863,15 +958,20 @@ def _render_myteam(payload: dict[str, Any]) -> str:
             '<div class=card><div class=spread><b style=text-transform:capitalize>'
             f"{_esc(field.replace('_', ' '))}</b>{chip}</div>"
             f'<div class="num" style=font-size:1.15rem;font-weight:800;margin-top:.3rem>'
-            f"{_esc(entry.get('value'))}</div>"
-            f'<p class=sub style=margin:.3rem 0 0>{_esc(entry.get("note"))}</p></div>'
+            f"{_esc(entry.get('value') if entry.get('value') is not None else chr(8211))}</div>"
+            f'<p class=sub style="margin:.3rem 0 0">{_esc(entry.get("note") or _EM_DASH)}</p></div>'
         )
     drawer_json = json.dumps(
         _drawer_entries(payload), separators=(",", ":"), ensure_ascii=False
     ).replace("</", "<\\/")
+    entry_chip = (
+        f'<span class=chip info>entry {_esc(team.get("entry_id"))}</span>'
+        if team.get("entry_id") is not None
+        else ""
+    )
     header = (
         f'<div class=spread style=margin-top:.4rem><h1>{_esc(team.get("team_name") or "My Team")}'
-        f"</h1><span class=chip info>entry {_esc(team.get('entry_id'))}</span></div>"
+        f"</h1>{entry_chip}</div>"
         f'<p class=sub>Squad verified from official GW{team.get("picks_verified_event")} picks.'
         " Tap any player for the full picture.</p>"
     )
@@ -967,46 +1067,66 @@ def _drawer_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _drawer_script() -> str:
-    return """
+    return r"""
 (function(){
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+window.fplEsc=esc;
 var data=window.FPL_DRAWER||[];
 var drawer=document.getElementById('pdrawer');
 if(!drawer)return;
 var panel=document.getElementById('pd-panel');
+var lastFocus=null;
 function fmt(v,suffix,dp){if(v===null||v===undefined)return'&ndash;';
  return (typeof v==='number'?v.toFixed(dp||1):v)+suffix;}
+function stat(k,v){return '<div class=stat><div class="v num">'+v+'</div><div class=k>'+k+'</div></div>';}
+function kvh(t){return '<div class=kv-h>'+t+'</div>';}
 function open(id){var p=data.find(function(r){return String(r.id)===String(id)});
  if(!p)return;
+ lastFocus=document.activeElement;
  var prov=p.is_c?'CAPTAIN':(p.is_v?'VICE-CAPTAIN':'');
+ var range=(p.lo===null||p.lo===undefined)?'&ndash;':(p.lo.toFixed(1)+'\u2013'+p.hi.toFixed(1));
+ var press=(p.plvl?p.plvl:'')+(p.pdir&&p.pdir!=='FLAT'?' '+(p.pdir==='UP'?'\u2191':(p.pdir==='DOWN'?'\u2193':'')):'');
+ var avail=(p.news?'<span class="chip bad">'+esc(p.status)+'</span> ':'')
+  +(p.chance!==null&&p.chance!==undefined?'<span class="chip '+(p.chance<75?'warn':'ok')+'">'+p.chance+'% to play</span>':'');
  panel.innerHTML=
   '<button class=dclose data-close aria-label="Close">&times;</button>'
-  +'<h1 style=margin-right:1.4rem>'+p.name+'</h1>'
+  +'<h1 style="margin-right:3.2rem">'+esc(p.name)+'</h1>'
   +(prov?'<span class="chip warn">'+prov+'</span> ':'')
-  +'<span class=chip info>'+p.team+'</span>'
-  +'<span class=chip>'+(p.fixture||'fixture n/a')+'</span>'
-  +(p.news?'<span class="chip bad">'+p.status+'</span>':'')
+  +'<span class="chip info">'+esc(p.team)+'</span>'
+  +'<span class=chip>'+esc(p.fixture||'fixture n/a')+'</span>'
+  +avail
+  +kvh('Projection (modelled)')
   +'<div class=kv>'
-  +stat('Price','&pound;'+fmt(p.price,'m'))
-  +stat('24h price',(p.d24===null||p.d24===undefined)?'&ndash;':(p.d24>0?'+':'')+p.d24.toFixed(1)+'m')
-  +stat('Ownership',fmt(p.ownership,'%'))
-  +stat('Net transfers',fmt(p.net_gw,'',0))
-  +stat('Velocity 6h',p.v6===null||p.v6===undefined?'&ndash;':fmt(p.v6,'/h',0))
-  +stat('Pressure',(p.plvl?p.plvl:'')+(p.pdir&&p.pdir!=='FLAT'?' '+(p.pdir==='UP'?'\u2191':'\u2193'):''))
   +stat('xP',fmt(p.xp,'',2))
   +stat('xMins',fmt(p.mins,'',0))
-  +stat('Range',(p.lo===null?'':('['+p.lo.toFixed(1)+', '+p.hi.toFixed(1))+']'))
+  +stat('Range',range)
   +stat('Risk',fmt(p.risk,'',2))
   +'</div>'
-  +(p.chance!==null&&p.chance!==undefined?'<p class=sub>Chance of playing: '+p.chance+'%</p>':'')
-  +(p.news?'<p class="sub" style=color:var(--warn)>'+p.news+'</p>':'')
+  +kvh('Availability')
+  +'<div class=kv>'
+  +stat('Status',esc((p.status==='a'?'available':(p.status||'-'))))
+  +stat('News',p.news?esc(String(p.news).slice(0,26)):'none')
+  +'</div>'
+  +kvh('Market (observed)')
+  +'<div class=kv>'
+  +stat('Price','\u00a3'+fmt(p.price,'m'))
+  +stat('24h move',(p.d24===null||p.d24===undefined)?'\u2013':(p.d24>0?'+':'')+p.d24.toFixed(1)+'m')
+  +stat('Owned',fmt(p.ownership,'%'))
+  +stat('Net GW',fmt(p.net_gw,'',0))
+  +stat('Vel 6h',(p.v6===null||p.v6===undefined)?'\u2013':fmt(p.v6,'/h',0))
+  +stat('Pressure',press||'\u2013')
+  +'</div>'
   +'<div class=why><b>Why:</b> '+window.fplWhyText(p.components)+'</div>'
-  +'<p class=sub style=margin-bottom:0>Model '+p.model
-  +' &middot; xP/xMins/range are MODELLED &middot; price, ownership and transfer counts are OBSERVED.</p>';
+  +'<p class=sub style="margin-bottom:0">Model '+esc(p.model)
+  +' &middot; projections are model estimates; market figures are observed.</p>';
  drawer.classList.add('open');
  var closeBtn=panel.querySelector('[data-close]');
- if(closeBtn)closeBtn.addEventListener('click',close);}
-function close(){drawer.classList.remove('open');}
-function stat(k,v){return '<div class=stat><div class="v num">'+v+'</div><div class=k>'+k+'</div></div>';}
+ if(closeBtn)closeBtn.addEventListener('click',close);
+ panel.tabIndex=-1;panel.focus();}
+function close(){drawer.classList.remove('open');
+ if(lastFocus&&lastFocus.focus)lastFocus.focus();}
+function stat2(k,v){return stat(k,v);}
 window.fplWhyText=function(components){
  var c=components||{};var labels={appearance:'secure minutes outlook',goals:'goal threat',
  assists:'chance creation',clean_sheet:'clean-sheet outlook',bonus:'bonus potential',
@@ -1020,16 +1140,32 @@ window.fplWhyText=function(components){
  var s=pos.length?('Most of the projection comes from '+pos.join(' together with '))
   :'The projection is modest across every component';
  if(neg)s+=', partly offset by '+neg;
- return s+'. Component values are model estimates.';};
+ return esc(s+'. Component values are model estimates.');};
 document.querySelectorAll('.pcard[data-player-id]').forEach(function(el){
  el.addEventListener('click',function(){open(el.getAttribute('data-player-id'));});});
 drawer.addEventListener('click',function(e){
  if(e.target.hasAttribute('data-close'))close();});
 document.addEventListener('keydown',function(e){
  if(e.key==='Escape'){close();
-  var sh=document.getElementById('moresheet');if(sh)sh.classList.remove('open');}});}
+  var sh=document.getElementById('moresheet');if(sh)sh.classList.remove('open');}});
+/* Swipe-down to dismiss (mobile sheet behaviour the grabber promises). */
+var startY=null,dY=0;
+panel.addEventListener('touchstart',function(e){
+ if(drawer.classList.contains('open')&&e.touches.length===1){
+  startY=e.touches[0].clientY;dY=0;}},{passive:true});
+panel.addEventListener('touchmove',function(e){
+ if(startY===null)return;dY=e.touches[0].clientY-startY;
+ if(dY>0){panel.style.transform='translateY('+dY+'px)';
+  panel.style.transition='none';}},{passive:true});
+panel.addEventListener('touchend',function(){
+ if(startY===null)return;
+ panel.style.transition='';panel.style.transform='';
+ if(dY>90)close();
+ startY=null;});
 })();
 """
+
+
 
 
 # --------------------------------------------------------------------------
@@ -1069,17 +1205,17 @@ def _render_transfers(payload: dict[str, Any]) -> str:
         )
         ins = plan.get("transfers_in") or []
         outs = plan.get("transfers_out") or []
-        moves = _move_cards(payload, list(ins), list(outs))
+        moves = _move_cards(payload, list(ins), list(outs), plan.get("hit_cost"))
         panels.append(
             f'<div class="plan{" active" if active else ""}" id=plan-{key} role=tabpanel '
             f'aria-labelledby=t-{key}><div class=metrics>'
             + _stat("projected", f"{plan.get('projected_points', 0):.2f}")
-            + _stat("gain vs roll", _fmt_signed(gain, 2))
+            + _stat("gain vs roll", _fmt_signed(gain, 2, " pts"))
             + _stat("transfers used", str(len(ins)))
             + _stat("hit cost", f"{plan.get('hit_cost', 0)} pts")
             + _stat("captain", _esc(plan.get("captain") or "-"))
             + "</div>" + moves
-            + ('<p class=sub style=margin:.5rem 0 0>Bench order: '
+            + ('<p class=sub style="margin:.5rem 0 0">Bench order: '
                + _esc(", ".join(plan.get("bench_order") or [])) + "</p>")
             + "</div>"
         )
@@ -1114,7 +1250,7 @@ def _render_transfers(payload: dict[str, Any]) -> str:
         + '<div class=mgrid>' + "".join(state_cards) + "</div>"
         + (("<h2>Availability concerns</h2><ul class=sub>" + concerns + "</ul>")
            if concerns else "")
-        + _PLAN_SWITCH_SCRIPT
+        + "<script>" + _PLAN_SWITCH_SCRIPT + "</script>"
     )
 
 
@@ -1173,7 +1309,8 @@ def _render_captain(payload: dict[str, Any]) -> str:
             for rank in ids
         )
         selects.append(
-            f'<label class=sub>Captain {side}: <select id=cmp-{side}>{options}</select></label>'
+            f'<label class=sub>Captain {side}: '
+            f'<select class=sel id=cmp-{side}>{options}</select></label>'
         )
     return (
         _hero(payload)
@@ -1259,60 +1396,72 @@ def _render_players(payload: dict[str, Any]) -> str:
     ).replace("</", "<\\/")
     return (
         _hero(payload)
-        + '<h1 style=margin-top:.6rem>Player explorer</h1>'
-        + '<p class=sub>xP/xMins/risk are MODELLED &middot; price, ownership and net '
-        "transfers are OBSERVED.</p>"
+        + '<h1 style="margin-top:.6rem">Player explorer</h1>'
+        + '<p class=sub>Tap a card for the full picture; use the small circle to '
+        "build a comparison. xP/xMins/risk are MODELLED.</p>"
         + '<div class=toolbar role=search>'
-        + '<input type=search id=q placeholder="Search player..." aria-label="Search player">'
-        + '<select id=fpos aria-label="Position"><option value="">Pos</option><option>GK</option>'
-        "<option>DEF</option><option>MID</option><option>FWD</option></select>"
+        + '<input type=search id=q placeholder="Search player..." aria-label="Search player" '
+        'style="flex:1 1 100%">'
+        + '</div><div class=filters aria-label="Filters">'
+        + '<select id=fpos aria-label="Position"><option value="">Position</option>'
+        "<option>GK</option><option>DEF</option><option>MID</option><option>FWD</option></select>"
         + '<select id=fclub aria-label="Club"><option value="">Club</option></select>'
-        + '<input id=fmin type=number step=0.1 min=0 placeholder="Min xMins" style=max-width:96px '
-        'aria-label="Minimum expected minutes">'
-        + '<input id=frisk type=number step=0.05 min=0 max=1 placeholder="Max risk" '
-        'style=max-width:88px aria-label="Maximum risk">'
-        + '<label class=chip style=cursor:pointer><input id=fdiff type=checkbox '
-        'style=margin-right:4px>Differential</label>'
+        + '<input id=fmin type=number inputmode=decimal step=0.1 min=0 '
+        'placeholder="Min xMins" aria-label="Minimum expected minutes">'
+        + '<input id=frisk type=number inputmode=decimal step=0.05 min=0 max=1 '
+        'placeholder="Max risk" aria-label="Maximum risk">'
+        + '<label class="chip tappable"><input id=fdiff type=checkbox style=margin-right:5px>'
+        'Differential</label>'
+        + "</div>"
+        + '<div class="spread" style=margin:.4rem 0 .5rem>'
+        + '<span class=sub id=pcount></span>'
         + '<select id=sortby aria-label="Sort by"><option value=x>xP</option>'
         "<option value=m>xMins</option><option value=pr>Price</option>"
         "<option value=o>Ownership</option><option value=nt>Net transfers</option>"
         "<option value=v6>Velocity</option><option value=r>Risk</option></select></div>"
-        + '<div id=pcount class=sub style=margin-bottom:.5rem></div>'
-        + '<div class=mgrid id=plist aria-live=polite></div>'
-        + '<div class=comparebar id=cbar role=status><span class=sub id=clist></span>'
-        + '<button class="btn primary" id=cgo>Compare</button>'
-        + '<button class=btn id=cclear>Clear</button></div>'
+        + '<div class=mgrid id=plist aria-live=polite>'
+        + '<div class=skel></div><div class=skel></div><div class=skel></div>'
+        + '<div class=skel></div><div class=skel></div><div class=skel></div></div>'
+        + '<div class=comparebar id=cbar role=status>'
+        + '<button class=btn id=cclear>Clear</button>'
+        + '<span class=sub id=clist></span>'
+        + '<button class="btn primary" id=cgo disabled>Compare</button></div>'
         + '<div class=drawer id=pdrawer role=dialog aria-modal=true aria-label="Player detail">'
         + '<div class=veil data-close></div><div class="panel grabber" id=pd-panel></div></div>'
         + "<script>window.FPL_PLAYERS=" + players + ";</script>"
-        + _EXPLORER_SCRIPT
+        + "<script>" + _EXPLORER_SCRIPT + "</script>"
     )
+
 
 
 _EXPLORER_SCRIPT = r"""
 (function(){
 var P=window.FPL_PLAYERS||[];
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 var clubs={};P.forEach(function(r){clubs[r.t]=1;});
 var clubSel=document.getElementById('fclub');
 Object.keys(clubs).sort().forEach(function(c){
  var o=document.createElement('option');o.textContent=c;clubSel.appendChild(o);});
 var list=document.getElementById('plist'),count=document.getElementById('pcount');
 var chosen=[];
-function fmt(v,d,suf){if(v===null||v===undefined)return'\u2013';
+function fmt(v,d,suf){if(v===null||v===undefined)return'\\u2013';
  return (typeof v==='number'?v.toFixed(d):v)+(suf||'');}
-function sgn(v,d){if(v===null||v===undefined)return'\u2013';
+function sgn(v,d){if(v===null||v===undefined)return'\\u2013';
  var c=v>0?'upC':(v<0?'downC':'');
  return '<span class="'+c+'">'+(v>0?'+':'')+Number(v).toFixed(d||0)+'</span>';}
-function card(r){return '<button class=mcard data-id="'+r.id+
- '" style="cursor:pointer;text-align:left">'+
- '<div><div class=nm>'+r.n+'</div><div class=sub>'+r.t+' '+r.p+
- (r.st&&r.st!=='a'?' \u26a0':'')+'</div>'+
- '<div class=sub>'+fmt(r.pr,1)+'m \u00b7 '+fmt(r.o,1)+'% own'+
- (r.fx?' \u00b7 '+r.fx:'')+(r.plvl&&r.plvl!=='LOW'?' \u00b7 pressure '+
- (r.pdir==='UP'?'\u2191':(r.pdir==='DOWN'?'\u2193':''))+r.plvl:'')+'</div></div>'+
- '<div style=text-align:right><div class=num style=font-weight:800>'+fmt(r.x,2)+' xP</div>'+
+function card(r){return '<div class=mcard data-id="'+r.id+'" role=button tabindex=0>'+
+ '<div style="flex:1;min-width:0;cursor:pointer" data-open="'+r.id+'">'+
+ '<div class=nm>'+esc(r.n)+'</div><div class=sub>'+esc(r.t)+' '+r.p+
+ (r.st&&r.st!=='a'?' \\u26a0':'')+'</div>'+
+ '<div class=sub>'+fmt(r.pr,1)+'m \\u00b7 '+fmt(r.o,1)+'% own'+
+ (r.fx?' \\u00b7 '+esc(r.fx):'')+'</div></div>'+
+ '<div style=text-align:right data-open="'+r.id+'">'+
+ '<div class=num style=font-weight:700>'+fmt(r.x,2)+' xP</div>'+
  '<div class="sub num">'+fmt(r.m,0)+' mins</div>'+
- '<div class="sub num">'+sgn(r.nt)+' net GW</div></div></button>';}
+ '<div class="sub num">'+sgn(r.nt)+' net</div></div>'+
+ '<button class=ctoggle data-cmp="'+r.id+'" role=checkbox aria-checked=false '+
+ 'aria-label="Compare '+esc(r.n)+'"></button></div>';}
 function render(){
  var q=(document.getElementById('q').value||'').toLowerCase();
  var pos=document.getElementById('fpos').value;
@@ -1333,49 +1482,95 @@ function render(){
  rows.sort(function(a,b){return (b[sort]||0)-(a[sort]||0);});
  count.textContent=rows.length+' of '+P.length+' players';
  list.innerHTML=rows.slice(0,80).map(card).join('')||
-  '<p class=sub>No players match these filters.</p>';
+  '<p class=sub>No players match - try removing a filter.</p>';
  renderCompare();}
-document.querySelectorAll('.toolbar input,.toolbar select').forEach(function(el){
- el.addEventListener('change',render);el.addEventListener('input',render);});
-var bar=document.getElementById('cbar');
 list.addEventListener('click',function(e){
- var b=e.target.closest('[data-id]');
- if(b)toggleCompare(b.getAttribute('data-id'));});
+ var cmp=e.target.closest('[data-cmp]');
+ if(cmp){toggleCompare(cmp.getAttribute('data-cmp'));cmp.blur();return;}
+ var opn=e.target.closest('[data-open]');
+ if(opn)openDrawer(opn.getAttribute('data-open'));});
+list.addEventListener('keydown',function(e){
+ if(e.key!=='Enter'&&e.key!==' ')return;
+ var opn=e.target.closest('[data-open]');
+ if(opn){e.preventDefault();openDrawer(opn.getAttribute('data-open'));}});
+document.querySelectorAll('.toolbar input,.toolbar select,.filters input,.filters select').forEach(function(el){
+ el.addEventListener('change',render);el.addEventListener('input',render);});
+var bar=document.getElementById('cbar'),go=document.getElementById('cgo');
 function toggleCompare(id){id=String(id);
  var i=chosen.indexOf(id);
  if(i>=0)chosen.splice(i,1);else if(chosen.length<3)chosen.push(id);
  renderCompare();}
 function renderCompare(){
  bar.classList.toggle('show',chosen.length>0);
+ document.body.classList.toggle('cmp-open',chosen.length>0);
+ go.disabled=chosen.length<2;
  document.getElementById('clist').textContent=chosen.map(function(id){
   var r=P.find(function(x){return String(x.id)===String(id);});
   return r?r.n:id;}).join(' vs ');
- list.querySelectorAll('[data-id]').forEach(function(el){
-  el.style.borderColor=chosen.indexOf(el.getAttribute('data-id'))>=0?'var(--accent)':'';});}
+ list.querySelectorAll('.mcard[data-id]').forEach(function(el){
+  var on=chosen.indexOf(el.getAttribute('data-id'))>=0;
+  el.style.outline=on?'2px solid var(--accent)':'';
+  var t=el.querySelector('[data-cmp]');
+  if(t)t.setAttribute('aria-checked',String(on));});}
 document.getElementById('cclear').addEventListener('click',function(){chosen=[];renderCompare();});
-document.getElementById('cgo').addEventListener('click',compareModal);
+go.addEventListener('click',compareModal);
 function compareModal(){
  var picked=chosen.map(function(id){
   return P.find(function(x){return String(x.id)===String(id);});}).filter(Boolean);
  if(picked.length<2)return;
  var fields=[['x','xP',2],['m','xMins',0],['pr','Price',1],['o','Own %',1],
   ['nt','Net GW',0],['v6','Vel/h 6h',0],['d24','Price 24h',1],['r','Risk',2]];
- var head=picked.map(function(r){return '<th>'+r.n+'</th>';}).join('');
+ var head=picked.map(function(r){return '<th>'+esc(r.n)+'</th>';}).join('');
  var body=fields.map(function(f){
   return '<tr><td class=sub>'+f[1]+'</td>'+picked.map(function(r){
-   return '<td class=num>'+((r[f[0]]===null||r[f[0]]===undefined)?'\u2013':
-    r[f[0]].toFixed(f[2]))+'</td>';}).join('')+'</tr>';}).join('');
+   return '<td class=num>'+((r[f[0]]===null||r[f[0]]===undefined)?'\\u2013':
+    Number(r[f[0]]).toFixed(f[2]))+'</td>';}).join('')+'</tr>';}).join('');
  drawerShow('<h1>Head to head</h1><div class=scrollx><table><thead><tr><th></th>'+head+
   '</tr></thead><tbody>'+body+'</tbody></table></div>');}
-render();renderCompare();
+/* ---- shared drawer ---- */
 var drawer=document.getElementById('pdrawer'),panel=document.getElementById('pd-panel');
-function drawerShow(html){panel.innerHTML=
- '<button class=dclose data-close aria-label=Close>&times;</button>'+html;
- drawer.classList.add('open');}
+var lastFocus=null;
+function stat(k,v){return '<div class=stat><div class="v num">'+v+'</div><div class=k>'+k+'</div></div>';}
+function kvh(t){return '<div class=kv-h>'+t+'</div>';}
+function openDrawer(id){
+ var r=P.find(function(x){return String(x.id)===String(id);});
+ if(!r)return;
+ lastFocus=document.activeElement;
+ var press=(r.plvl?r.plvl:'')+((r.pdir==='UP')?' \\u2191':((r.pdir==='DOWN')?' \\u2193':''));
+ panel.innerHTML=
+  '<button class=dclose data-close aria-label="Close">&times;</button>'
+  +'<h1 style="margin-right:3.4rem">'+esc(r.n)+'</h1>'
+  +'<span class="chip info">'+esc(r.t)+'</span><span class=chip>'+r.p+'</span>'
+  +(r.fx?'<span class=chip>'+esc(r.fx)+'</span>':'')
+  +(r.st&&r.st!=='a'?'<span class="chip bad">'+esc(r.st)+'</span>':'')
+  +(r.nw?'<p class="sub" style=color:var(--warn)>'+esc(r.nw)+'</p>':'')
+  +kvh('Projection (modelled)')
+  +'<div class=kv>'
+  +stat('xP',fmt(r.x,'',2))+stat('xMins',fmt(r.m,0))
+  +stat('Range',(r.lo===null||r.lo===undefined)?'\\u2013':(Number(r.lo).toFixed(1)+'\\u2013'+Number(r.hi).toFixed(1)))
+  +stat('Risk',fmt(r.r,2))
+  +'</div>'
+  +kvh('Market (observed)')
+  +'<div class=kv>'
+  +stat('Price','\\u00a3'+fmt(r.pr,1)+'m')
+  +stat('Owned',fmt(r.o,1)+'%')
+  +stat('Net GW',fmt(r.nt,0))
+  +stat('Vel 6h',(r.v6===null||r.v6===undefined)?'\\u2013':fmt(r.v6,0)+'/h')
+  +stat('24h move',(r.d24===null||r.d24===undefined)?'\\u2013':((r.d24>0?'+':'')+r.d24.toFixed(1)+'m'))
+  +stat('Pressure',press||'\\u2013')
+  +'</div>'
+  +'<p class=sub style=margin-bottom:0>xP/xMins/range/risk are model estimates. '
+  +'Market figures are observed official data.</p>';
+ drawer.classList.add('open');
+ var cb=panel.querySelector('[data-close]');
+ if(cb)cb.addEventListener('click',closeDrawer);
+ panel.tabIndex=-1;panel.focus();}
+function closeDrawer(){drawer.classList.remove('open');
+ if(lastFocus&&lastFocus.focus)lastFocus.focus();}
 drawer.addEventListener('click',function(e){
- if(e.target.hasAttribute('data-close'))drawer.classList.remove('open');});
+ if(e.target.hasAttribute('data-close'))closeDrawer();});
 document.addEventListener('keydown',function(e){
- if(e.key==='Escape'){drawer.classList.remove('open');}});}
+ if(e.key==='Escape')closeDrawer();});
 })();
 """
 
@@ -1565,11 +1760,15 @@ def _typed_changes(payload: dict[str, Any]) -> list[dict[str, str]]:
             for row in market.get("players") or []
         }
         for event in market_events(market, names, limit=40):
-            # market_events() emits timestamp-keyed records; normalize to the
-            # time/detail shape this feed renders.
+            # Normalize market-event schema AND vocabulary to the chip taxonomy
+            # rendered below so client-side filters match exactly.
+            kind = {
+                "PRICE CHANGE": "PRICE",
+                "OWNERSHIP SURGE": "OWNERSHIP",
+            }.get(str(event.get("type") or ""), str(event.get("type") or "MARKET"))
             events.append(
                 {
-                    "type": str(event.get("type") or "MARKET"),
+                    "type": kind,
                     "time": str(event.get("timestamp") or "")[:16].replace("T", " "),
                     "detail": str(event.get("detail") or ""),
                 }
@@ -1583,15 +1782,17 @@ _EVENT_CLASS = {"PRICE": "warn", "NEWS": "bad", "OWNERSHIP": "info", "TRANSFER S
 def _render_changes(payload: dict[str, Any]) -> str:
     events = _typed_changes(payload)
     chips = "".join(
-        f'<button class=btn data-ev="{kind}" style=padding:.32rem .6rem;font-size:.72rem>'
+        f'<button class="btn{" on" if kind == "ALL" else ""} data-ev="{kind}" '
+        'aria-pressed=' + ('"true"' if kind == "ALL" else '"false"') + ">"
         f"{kind}</button>"
         for kind in ("ALL", "PRICE", "NEWS", "OWNERSHIP", "TRANSFER SURGE")
     )
+    today = datetime.now().strftime("%m-%d")
     items = "".join(
         '<div class=feeditem data-type="'
         + _esc(event["type"])
         + '"><span class=feedtime>'
-        + _esc(event["time"][-5:])
+        + _esc(event["time"][:16].replace("T", " ") if len(event["time"]) >= 16 else event["time"])
         + '</span><span><span class="chip '
         + _EVENT_CLASS.get(event["type"], "")
         + '">'
@@ -1604,11 +1805,17 @@ def _render_changes(payload: dict[str, Any]) -> str:
     body = items or '<p class=sub>Nothing recorded yet - feed fills as ingests land.</p>'
     filter_script = """
 (function(){
-document.querySelectorAll('[data-ev]').forEach(function(b){
+var chips=document.querySelectorAll('[data-ev]');
+chips.forEach(function(b){
  b.addEventListener('click',function(){
   var k=b.getAttribute('data-ev');
+  chips.forEach(function(x){
+   var on=x===b;
+   x.classList.toggle('on',on);
+   x.setAttribute('aria-pressed',String(on));});
   document.querySelectorAll('.feeditem').forEach(function(item){
-   item.style.display=(k==='ALL'||item.getAttribute('data-type')===k)?'':'none';});});});
+   var t=item.getAttribute('data-type');
+   item.style.display=(k==='ALL'||t===k||t.indexOf(k)===0)?'':'none';});});});
 })();
 """
     return (

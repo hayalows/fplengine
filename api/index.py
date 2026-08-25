@@ -72,7 +72,7 @@ def _requested_tab(path: str) -> str:
     if candidate in _VALID_TABS:
         return str(candidate)
     if parsed.path.startswith("/site/"):
-        candidate = parsed.path.removeprefix("/site/").split("/", 1)[0]
+        candidate = parsed.path.removeprefix("/site/").rstrip("/").split("/", 1)[0]
         if candidate in _VALID_TABS:
             return candidate
     return "home"
