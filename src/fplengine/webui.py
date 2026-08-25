@@ -298,9 +298,9 @@ appearance:none;-webkit-appearance:none}
 bottom:calc(76px + env(safe-area-inset-bottom));z-index:55;
 background:rgba(44,44,46,.92);backdrop-filter:blur(20px) saturate(180%);
 border-radius:16px;padding:.55rem .85rem;display:flex;gap:.6rem;align-items:center;
-box-shadow:0 10px 34px rgba(0,0,0,.5);opacity:0;
+box-shadow:0 10px 34px rgba(0,0,0,.5);opacity:0;pointer-events:none;
 transition:transform .35s var(--ease),opacity .3s var(--ease)}
-.comparebar.show{transform:translateX(-50%) translateY(0);opacity:1}
+.comparebar.show{transform:translateX(-50%) translateY(0);opacity:1;pointer-events:auto}
 @media(min-width:920px){.comparebar{bottom:1.3rem}}
 .legendrow{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -495,7 +495,7 @@ def _hero(payload: dict[str, Any]) -> str:
     warn_dots = "".join(
         f'<span class=statusline title="{_esc(w)}"><span class="dot stale"></span>'
         "notice</span>"
-        for w in warnings[:1]
+        for w in warnings[:2]
     )
     return (
         '<section class=hero aria-label="Gameweek status">'
@@ -535,7 +535,7 @@ def _transfer_card(record: dict[str, Any] | None, direction: str) -> str:
         detail_bits.append(f"\u00a3{price:.1f}m")
     css_class = "tcard out" if direction == "OUT" else "tcard"
     return (
-        f'<div class={css_class}><div class=cl>{direction}</div>'
+        f'<div class="{css_class}"><div class=cl>{direction}</div>'
         f'<div class=nm>{_esc(record.get("player_name") or record.get("name"))}</div>'
         f'<div class=sub>{" &middot; ".join(b for b in detail_bits if b)}</div>'
         '<div class="xp num">'
