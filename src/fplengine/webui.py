@@ -628,6 +628,8 @@ def _move_cards(
         arrow = '<span class=arrow>&rarr;</span>' if sell_card and buy_card else ""
         money = ""
         if isinstance(in_rec, dict) and isinstance(out_rec, dict):
+            # delta = buy - sell: spending more than received lowers bank.
+
             in_price = in_rec.get("price")
             out_price = out_rec.get("price")
             if isinstance(in_price, (int, float)) and isinstance(out_price, (int, float)):
@@ -635,7 +637,7 @@ def _move_cards(
                 money = (
                     f'<div class="chip {"warn" if delta > 0 else ""}" '
                     'style="align-self:center">'
-                    f"{'-' if delta <= 0 else '+'}&pound;{abs(delta):.1f}m bank</div>"
+                    f"{'+-'[delta > 0]}&pound;{abs(delta):.1f}m bank</div>"
                 )
         cards.append(f"<div class=movecards>{sell_card}{arrow}{buy_card}{money}</div>")
     if isinstance(hit_cost, int) and hit_cost > 0:
@@ -682,7 +684,7 @@ def _next_move_card(payload: dict[str, Any]) -> str:
         f"{provenance}</div>"
         f'<div class="action-word {action_css}" style=margin-top:.35rem>'
         f"{_esc(rec.get('action'))}</div>"
-        f'<div class=movecards>{_plan_ins_outs(payload, plan, rec.get("hit_cost"))}</div>'
+        f'<div class=movecards>{_plan_ins_outs(payload, plan, plan.get("hit_cost"))}</div>'
         '<div class=metrics>'
         + _stat("gain vs roll", _fmt_signed(gain, 2, " pts"))
         + _stat("hit cost", f"{plan.get('hit_cost', 0)} pts")
@@ -1435,27 +1437,31 @@ def _render_players(payload: dict[str, Any]) -> str:
 _EXPLORER_SCRIPT = r"""
 (function(){
 var P=window.FPL_PLAYERS||[];
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 var clubs={};P.forEach(function(r){clubs[r.t]=1;});
 var clubSel=document.getElementById('fclub');
 Object.keys(clubs).sort().forEach(function(c){
  var o=document.createElement('option');o.textContent=c;clubSel.appendChild(o);});
 var list=document.getElementById('plist'),count=document.getElementById('pcount');
 var chosen=[];
-function fmt(v,d,suf){if(v===null||v===undefined)return'\u2013';
+function fmt(v,d,suf){if(v===null||v===undefined)return'\\u2013';
  return (typeof v==='number'?v.toFixed(d):v)+(suf||'');}
-function sgn(v,d){if(v===null||v===undefined)return'\u2013';
+function sgn(v,d){if(v===null||v===undefined)return'\\u2013';
  var c=v>0?'upC':(v<0?'downC':'');
  return '<span class="'+c+'">'+(v>0?'+':'')+Number(v).toFixed(d||0)+'</span>';}
-function card(r){return '<button class=mcard data-id="'+r.id+
- '" style="cursor:pointer;text-align:left">'+
- '<div><div class=nm>'+r.n+'</div><div class=sub>'+r.t+' '+r.p+
- (r.st&&r.st!=='a'?' \u26a0':'')+'</div>'+
- '<div class=sub>'+fmt(r.pr,1)+'m \u00b7 '+fmt(r.o,1)+'% own'+
- (r.fx?' \u00b7 '+r.fx:'')+(r.plvl&&r.plvl!=='LOW'?' \u00b7 pressure '+
- (r.pdir==='UP'?'\u2191':(r.pdir==='DOWN'?'\u2193':''))+r.plvl:'')+'</div></div>'+
- '<div style=text-align:right><div class=num style=font-weight:800>'+fmt(r.x,2)+' xP</div>'+
+function card(r){return '<div class=mcard data-id="'+r.id+'" role=button tabindex=0>'+
+ '<div style="flex:1;min-width:0;cursor:pointer" data-open="'+r.id+'">'+
+ '<div class=nm>'+esc(r.n)+'</div><div class=sub>'+esc(r.t)+' '+r.p+
+ (r.st&&r.st!=='a'?' \\u26a0':'')+'</div>'+
+ '<div class=sub>'+fmt(r.pr,1)+'m \\u00b7 '+fmt(r.o,1)+'% own'+
+ (r.fx?' \\u00b7 '+esc(r.fx):'')+'</div></div>'+
+ '<div style=text-align:right data-open="'+r.id+'">'+
+ '<div class=num style=font-weight:700>'+fmt(r.x,2)+' xP</div>'+
  '<div class="sub num">'+fmt(r.m,0)+' mins</div>'+
- '<div class="sub num">'+sgn(r.nt)+' net GW</div></div></button>';}
+ '<div class="sub num">'+sgn(r.nt)+' net</div></div>'+
+ '<button class=ctoggle data-cmp="'+r.id+'" role=checkbox aria-checked=false '+
+ 'aria-label="Compare '+esc(r.n)+'"></button></div>';}
 function render(){
  var q=(document.getElementById('q').value||'').toLowerCase();
  var pos=document.getElementById('fpos').value;
@@ -1476,49 +1482,95 @@ function render(){
  rows.sort(function(a,b){return (b[sort]||0)-(a[sort]||0);});
  count.textContent=rows.length+' of '+P.length+' players';
  list.innerHTML=rows.slice(0,80).map(card).join('')||
-  '<p class=sub>No players match these filters.</p>';
+  '<p class=sub>No players match - try removing a filter.</p>';
  renderCompare();}
-document.querySelectorAll('.toolbar input,.toolbar select').forEach(function(el){
- el.addEventListener('change',render);el.addEventListener('input',render);});
-var bar=document.getElementById('cbar');
 list.addEventListener('click',function(e){
- var b=e.target.closest('[data-id]');
- if(b)toggleCompare(b.getAttribute('data-id'));});
+ var cmp=e.target.closest('[data-cmp]');
+ if(cmp){toggleCompare(cmp.getAttribute('data-cmp'));cmp.blur();return;}
+ var opn=e.target.closest('[data-open]');
+ if(opn)openDrawer(opn.getAttribute('data-open'));});
+list.addEventListener('keydown',function(e){
+ if(e.key!=='Enter'&&e.key!==' ')return;
+ var opn=e.target.closest('[data-open]');
+ if(opn){e.preventDefault();openDrawer(opn.getAttribute('data-open'));}});
+document.querySelectorAll('.toolbar input,.toolbar select,.filters input,.filters select').forEach(function(el){
+ el.addEventListener('change',render);el.addEventListener('input',render);});
+var bar=document.getElementById('cbar'),go=document.getElementById('cgo');
 function toggleCompare(id){id=String(id);
  var i=chosen.indexOf(id);
  if(i>=0)chosen.splice(i,1);else if(chosen.length<3)chosen.push(id);
  renderCompare();}
 function renderCompare(){
  bar.classList.toggle('show',chosen.length>0);
+ document.body.classList.toggle('cmp-open',chosen.length>0);
+ go.disabled=chosen.length<2;
  document.getElementById('clist').textContent=chosen.map(function(id){
   var r=P.find(function(x){return String(x.id)===String(id);});
   return r?r.n:id;}).join(' vs ');
- list.querySelectorAll('[data-id]').forEach(function(el){
-  el.style.borderColor=chosen.indexOf(el.getAttribute('data-id'))>=0?'var(--accent)':'';});}
+ list.querySelectorAll('.mcard[data-id]').forEach(function(el){
+  var on=chosen.indexOf(el.getAttribute('data-id'))>=0;
+  el.style.outline=on?'2px solid var(--accent)':'';
+  var t=el.querySelector('[data-cmp]');
+  if(t)t.setAttribute('aria-checked',String(on));});}
 document.getElementById('cclear').addEventListener('click',function(){chosen=[];renderCompare();});
-document.getElementById('cgo').addEventListener('click',compareModal);
+go.addEventListener('click',compareModal);
 function compareModal(){
  var picked=chosen.map(function(id){
   return P.find(function(x){return String(x.id)===String(id);});}).filter(Boolean);
  if(picked.length<2)return;
  var fields=[['x','xP',2],['m','xMins',0],['pr','Price',1],['o','Own %',1],
   ['nt','Net GW',0],['v6','Vel/h 6h',0],['d24','Price 24h',1],['r','Risk',2]];
- var head=picked.map(function(r){return '<th>'+r.n+'</th>';}).join('');
+ var head=picked.map(function(r){return '<th>'+esc(r.n)+'</th>';}).join('');
  var body=fields.map(function(f){
   return '<tr><td class=sub>'+f[1]+'</td>'+picked.map(function(r){
-   return '<td class=num>'+((r[f[0]]===null||r[f[0]]===undefined)?'\u2013':
-    r[f[0]].toFixed(f[2]))+'</td>';}).join('')+'</tr>';}).join('');
+   return '<td class=num>'+((r[f[0]]===null||r[f[0]]===undefined)?'\\u2013':
+    Number(r[f[0]]).toFixed(f[2]))+'</td>';}).join('')+'</tr>';}).join('');
  drawerShow('<h1>Head to head</h1><div class=scrollx><table><thead><tr><th></th>'+head+
   '</tr></thead><tbody>'+body+'</tbody></table></div>');}
-render();renderCompare();
+/* ---- shared drawer ---- */
 var drawer=document.getElementById('pdrawer'),panel=document.getElementById('pd-panel');
-function drawerShow(html){panel.innerHTML=
- '<button class=dclose data-close aria-label=Close>&times;</button>'+html;
- drawer.classList.add('open');}
+var lastFocus=null;
+function stat(k,v){return '<div class=stat><div class="v num">'+v+'</div><div class=k>'+k+'</div></div>';}
+function kvh(t){return '<div class=kv-h>'+t+'</div>';}
+function openDrawer(id){
+ var r=P.find(function(x){return String(x.id)===String(id);});
+ if(!r)return;
+ lastFocus=document.activeElement;
+ var press=(r.plvl?r.plvl:'')+((r.pdir==='UP')?' \\u2191':((r.pdir==='DOWN')?' \\u2193':''));
+ panel.innerHTML=
+  '<button class=dclose data-close aria-label="Close">&times;</button>'
+  +'<h1 style="margin-right:3.4rem">'+esc(r.n)+'</h1>'
+  +'<span class="chip info">'+esc(r.t)+'</span><span class=chip>'+r.p+'</span>'
+  +(r.fx?'<span class=chip>'+esc(r.fx)+'</span>':'')
+  +(r.st&&r.st!=='a'?'<span class="chip bad">'+esc(r.st)+'</span>':'')
+  +(r.nw?'<p class="sub" style=color:var(--warn)>'+esc(r.nw)+'</p>':'')
+  +kvh('Projection (modelled)')
+  +'<div class=kv>'
+  +stat('xP',fmt(r.x,'',2))+stat('xMins',fmt(r.m,0))
+  +stat('Range',(r.lo===null||r.lo===undefined)?'\\u2013':(Number(r.lo).toFixed(1)+'\\u2013'+Number(r.hi).toFixed(1)))
+  +stat('Risk',fmt(r.r,2))
+  +'</div>'
+  +kvh('Market (observed)')
+  +'<div class=kv>'
+  +stat('Price','\\u00a3'+fmt(r.pr,1)+'m')
+  +stat('Owned',fmt(r.o,1)+'%')
+  +stat('Net GW',fmt(r.nt,0))
+  +stat('Vel 6h',(r.v6===null||r.v6===undefined)?'\\u2013':fmt(r.v6,0)+'/h')
+  +stat('24h move',(r.d24===null||r.d24===undefined)?'\\u2013':((r.d24>0?'+':'')+r.d24.toFixed(1)+'m'))
+  +stat('Pressure',press||'\\u2013')
+  +'</div>'
+  +'<p class=sub style=margin-bottom:0>xP/xMins/range/risk are model estimates. '
+  +'Market figures are observed official data.</p>';
+ drawer.classList.add('open');
+ var cb=panel.querySelector('[data-close]');
+ if(cb)cb.addEventListener('click',closeDrawer);
+ panel.tabIndex=-1;panel.focus();}
+function closeDrawer(){drawer.classList.remove('open');
+ if(lastFocus&&lastFocus.focus)lastFocus.focus();}
 drawer.addEventListener('click',function(e){
- if(e.target.hasAttribute('data-close'))drawer.classList.remove('open');});
+ if(e.target.hasAttribute('data-close'))closeDrawer();});
 document.addEventListener('keydown',function(e){
- if(e.key==='Escape'){drawer.classList.remove('open');}});}
+ if(e.key==='Escape')closeDrawer();});
 })();
 """
 

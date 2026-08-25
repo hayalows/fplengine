@@ -159,6 +159,60 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn("relation", reason)
         self.assertFalse(payload["market"]["available"])
 
+    def test_explorer_interactive_contract_is_served(self) -> None:
+        html = page("players", self.payload)
+        for needle in (
+            "go.disabled=chosen.length<2",
+            'data-cmp="',
+            "data-open=",
+            ".filters input,.filters select",
+            "openDrawer(",
+        ):
+            self.assertIn(needle, html)
+
+    def test_bank_impact_chip_sign_follows_spend_direction(self) -> None:
+        from fplengine import webui
+
+        payload = {
+            "all_players": [
+                {"player_name": "Cheap", "team": "C1", "position": "MID", "price": 4.5,
+                 "expected_points": 2.0, "expected_minutes": 60},
+                {"player_name": "Pricy", "team": "C2", "position": "MID", "price": 10.0,
+                 "expected_points": 6.0, "expected_minutes": 80},
+            ],
+        }
+        html = webui._move_cards(payload, ["Pricy"], ["Cheap"], hit_cost=0)
+        # Buying a dearer player must show bank going DOWN.
+        # Spending more than received lowers bank; sign must reflect that.
+        self.assertIn("-&pound;5.5m bank", html)
+        html_gain = webui._move_cards(payload, ["Cheap"], ["Pricy"])
+        self.assertIn("+&pound;5.5m bank", html_gain)
+
+    def test_home_hit_badge_reads_from_recommended_plan(self) -> None:
+        next_gw = {
+            "roll_plan": {"projected_points": 40.0, "transfers_in": [], "transfers_out": []},
+            "best_single_transfer": {"projected_points": 41.0},
+            "best_two_transfer": {"projected_points": 43.0},
+            "recommendation": {
+                "action": "TRANSFER (two)",
+                "reason": "r",
+                "gain_single_over_roll": 1.0,
+                "gain_double_over_roll": 3.0,
+                "best_gain_over_roll": 3.0,
+                "state_label": "APPROXIMATE",
+                "recommended_plan": {
+                    "projected_points": 43.0,
+                    "hit_cost": 4,
+                    "transfers_in": ["A", "B"],
+                    "transfers_out": ["C", "D"],
+                },
+            },
+        }
+        payload = dict(self.payload)
+        payload["next_gw"] = next_gw
+        html = page("home", payload)
+        self.assertIn("4-point hit included", html)
+
     def test_pitch_rows_group_by_real_positions(self) -> None:
         from fplengine import webui
 
