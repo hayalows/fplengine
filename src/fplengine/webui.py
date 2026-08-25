@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from html import escape
+
+_EM_DASH = "\u2013"
 from typing import Any
 
 ROUTES = (
@@ -955,7 +957,7 @@ def _render_myteam(payload: dict[str, Any]) -> str:
             f"{_esc(field.replace('_', ' '))}</b>{chip}</div>"
             f'<div class="num" style=font-size:1.15rem;font-weight:800;margin-top:.3rem>'
             f"{_esc(entry.get('value') if entry.get('value') is not None else chr(8211))}</div>"
-            f'<p class=sub style="margin:.3rem 0 0">{_esc(entry.get("note") or "\u2013")}</p></div>'
+            f'<p class=sub style="margin:.3rem 0 0">{_esc(entry.get("note") or _EM_DASH)}</p></div>'
         )
     drawer_json = json.dumps(
         _drawer_entries(payload), separators=(",", ":"), ensure_ascii=False
