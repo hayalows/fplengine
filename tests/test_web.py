@@ -114,6 +114,51 @@ class RenderTests(unittest.TestCase):
         self.assertIn('<option value="1" selected>', html)
         self.assertIn('<option value="2" selected>', html)
 
+    def test_explorer_script_is_wrapped_not_raw_text(self) -> None:
+        html = page("players", self.payload)
+        self.assertTrue(self._inside_script_block(html, "var P=window.FPL_PLAYERS||[];"))
+
+    def test_plan_switch_script_is_wrapped(self) -> None:
+        html = page("transfers", self.payload)
+        self.assertTrue(
+            self._inside_script_block(html, "document.querySelectorAll('.seg [data-plan]')")
+        )
+
+    @staticmethod
+    def _inside_script_block(html: str, marker: str) -> bool:
+        position = html.index(marker)
+        before = html[:position]
+        if "</script>" not in before:
+            return "<script>" in before
+        return before.rindex("<script>") > before.rindex("</script>")
+
+    def test_unknown_route_serves_home_and_trailing_slash_matches(self) -> None:
+        from api.index import _requested_tab
+
+        self.assertEqual(page("not-a-route", self.payload), page("home", self.payload))
+        self.assertEqual(_requested_tab("/site/home/"), "home")
+        self.assertEqual(_requested_tab("/site/"), "home")
+
+    def test_market_storage_errors_are_masked_in_payloads(self) -> None:
+        from fplengine.web import _attach_market_and_season
+
+        class FailingStore:
+            def market_polls(self, limit=200):
+                raise RuntimeError("relation does not exist")
+
+            def season_events(self):
+                return []
+
+        payload = {
+            "metadata": {"target_event": 3, "data_as_of": "2026-08-30T00:00:00+00:00"},
+            "warnings": [],
+        }
+        _attach_market_and_season(FailingStore(), payload, [], {}, {}, [])
+        reason = str(payload["market"]["reason"])
+        self.assertNotIn("RuntimeError", reason)
+        self.assertNotIn("relation", reason)
+        self.assertFalse(payload["market"]["available"])
+
     def test_pitch_rows_group_by_real_positions(self) -> None:
         from fplengine import webui
 

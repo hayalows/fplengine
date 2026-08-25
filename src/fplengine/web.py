@@ -196,8 +196,11 @@ def _attach_market_and_season(
         polls = store.market_polls(limit=200)
         states = store.market_states([row["id"] for row in polls])
         view = build_market_view(polls, states)
-    except Exception as exc:  # noqa: BLE001 - market must degrade independently
-        view = {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
+    except Exception:  # noqa: BLE001 - storage issues must degrade, never leak internals
+        view = {
+            "available": False,
+            "reason": "market history is still being set up - check back shortly",
+        }
     if view.get("available"):
         fixtures_by_team: dict[int, list[dict[str, str]]] = {}
         for fixture in fixtures:
@@ -387,15 +390,15 @@ def make_web_handler(site_cache: SiteCache) -> type[BaseHTTPRequestHandler]:
             parsed = urlparse(self.path)
             if parsed.path == "/":
                 self.send_response(HTTPStatus.FOUND)
-                self.send_header("Location", "/site/myteam")
+                self.send_header("Location", "/site/home")
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
-            if parsed.path == "/site" :
-                tab = "myteam"
+            if parsed.path == "/site":
+                tab = "home"
             elif parsed.path.startswith("/site/"):
-                candidate = parsed.path.removeprefix("/site/")
-                tab = candidate if any(candidate == key for key, _ in TABS) else "myteam"
+                candidate = parsed.path.removeprefix("/site/").rstrip("/").split("/", 1)[0]
+                tab = candidate if any(candidate == key for key, _ in TABS) else "home"
             else:
                 self.send_response(HTTPStatus.NOT_FOUND)
                 self.send_header("Content-Type", "text/plain")
@@ -404,8 +407,18 @@ def make_web_handler(site_cache: SiteCache) -> type[BaseHTTPRequestHandler]:
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            payload = site_cache.get()
-            body = page(tab, payload).encode("utf-8")
+            try:
+                payload = site_cache.get()
+                body = page(tab, payload).encode("utf-8")
+            except Exception as exc:  # noqa: BLE001 - mirror the Vercel adapter
+                print(f"FPL Engine request failed: {type(exc).__name__}: {exc}")
+                body = b"FPL Engine request failed. Check server logs."
+                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
