@@ -410,6 +410,33 @@ def report(handler: Any, base_database_url: str, query: dict[str, list[str]]) ->
                     """,
                     session_params,
                 )
+                operating_systems = grouped(
+                    f"""
+                    select coalesce(nullif(os_name,''),'Unknown') as label,
+                           count(*)::int as value
+                    from analytics.sessions
+                    where {session_where}
+                    group by 1 order by value desc limit 10
+                    """,
+                    session_params,
+                )
+                campaigns = grouped(
+                    f"""
+                    select
+                      case
+                        when nullif(utm_campaign,'') is not null and nullif(utm_source,'') is not null
+                          then utm_source || ' · ' || utm_campaign
+                        when nullif(utm_campaign,'') is not null then utm_campaign
+                        else utm_source
+                      end as label,
+                      count(*)::int as value
+                    from analytics.sessions
+                    where {session_where}
+                      and (nullif(utm_source,'') is not null or nullif(utm_campaign,'') is not null)
+                    group by 1 order by value desc limit 10
+                    """,
+                    session_params,
+                )
                 sections = grouped(
                     f"""
                     select coalesce(nullif(section_id,''),'Unknown') as label,
@@ -487,6 +514,8 @@ def report(handler: Any, base_database_url: str, query: dict[str, list[str]]) ->
                 "countries": countries,
                 "devices": devices,
                 "browsers": browsers,
+                "operatingSystems": operating_systems,
+                "campaigns": campaigns,
                 "sections": sections,
                 "interactions": interactions,
                 "recent": recent,
