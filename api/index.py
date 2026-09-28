@@ -93,6 +93,51 @@ class handler(BaseHTTPRequestHandler):
     server_version = "fplengine-vercel/0.1"
 
     def do_GET(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/index" and parse_qs(parsed.query).get("probe") == ["analytics_privileges"]:
+            if not _DATABASE_URL:
+                body = b'{"configured":false}'
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            try:
+                import json
+                import psycopg
+                with psycopg.connect(_DATABASE_URL) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            select current_database(), current_user,
+                                   has_database_privilege(current_user, current_database(), 'CREATE'),
+                                   has_schema_privilege(current_user, 'public', 'CREATE'),
+                                   has_schema_privilege(current_user, 'engine', 'CREATE'),
+                                   r.rolcreatedb, r.rolsuper
+                            from pg_roles r where r.rolname = current_user
+                        """)
+                        row = cur.fetchone()
+                payload = {
+                    "configured": True,
+                    "database": row[0],
+                    "user": row[1],
+                    "databaseCreate": bool(row[2]),
+                    "publicCreate": bool(row[3]),
+                    "engineCreate": bool(row[4]),
+                    "roleCreateDb": bool(row[5]),
+                    "superuser": bool(row[6]),
+                }
+                body = json.dumps(payload).encode("utf-8")
+            except Exception as exc:
+                body = ("{\"error\":\"" + type(exc).__name__ + "\"}").encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if _CACHE is None:
             body = (
                 "FPL Engine is deployed but no Neon database URL is configured."
