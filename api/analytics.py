@@ -254,7 +254,10 @@ def _authorized(cur: Any, handler: Any) -> bool:
         "select value from analytics.settings where key='dashboard_token_sha256'"
     )
     row = cur.fetchone()
-    return bool(row and hmac.compare_digest(str(row[0]), digest))
+    if not row:
+        return False
+    stored = row.get("value") if isinstance(row, dict) else row[0]
+    return hmac.compare_digest(str(stored), digest)
 
 
 def _range_clause(range_name: str, column: str) -> tuple[str, tuple[Any, ...]]:
@@ -289,7 +292,7 @@ def report(handler: Any, base_database_url: str, query: dict[str, list[str]]) ->
                     select
                       count(*)::int as sessions,
                       count(distinct visitor_id)::int as visitors,
-                      coalesce(round(avg(extract(epoch from (last_seen_at-started_at)))::numeric,1),0) as avg_session_seconds
+                      coalesce(round(avg(extract(epoch from (last_seen_at-started_at)))::numeric,1),0)::float8 as avg_session_seconds
                     from analytics.sessions
                     where {session_where}
                     """,

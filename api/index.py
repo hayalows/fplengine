@@ -1,10 +1,4 @@
-"""Vercel serverless adapter for the persisted FPL Engine website.
-
-This module contains no model logic. It reuses the existing Store, SiteCache and
-HTML renderer from ``src/fplengine``. Production should provide a Neon connection
-string through ``FPLENGINE_DATABASE_URL``; ``NEON_DATABASE_URL`` and ``DATABASE_URL``
-are accepted as compatibility aliases for existing hosting setups.
-"""
+"""Vercel serverless adapter for FPL Engine and portfolio analytics."""
 
 from __future__ import annotations
 
@@ -18,19 +12,14 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+API_DIR = Path(__file__).resolve().parent
+for path in (SRC, API_DIR):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
-# Vercel's import UI can materialize detected optional variables as empty strings.
-# Treat a blank schema as unset so Store can use the production default safely.
 if not os.environ.get("FPLENGINE_DB_SCHEMA", "").strip():
     os.environ["FPLENGINE_DB_SCHEMA"] = "engine"
 
-# SQLite stores the engine's JSON payloads as text, while Neon exposes the same
-# columns as JSONB and psycopg decodes them to Python objects by default. The
-# existing backend-neutral Store reader parses JSON text itself, so make psycopg
-# return raw JSON text in this read-only serverless process. This affects only
-# connections created after registration and does not alter data in Neon.
 try:
     from psycopg.types.json import set_json_loads
 
@@ -39,9 +28,13 @@ try:
 
     set_json_loads(_raw_json)
 except ImportError:
-    # Local SQLite development doesn't require the Postgres extra.
     pass
 
+from analytics import (  # noqa: E402
+    collect as analytics_collect,
+    handle_options as analytics_options,
+    report as analytics_report,
+)
 from fplengine.storage import Store  # noqa: E402
 from fplengine.web import SiteCache, TABS, page  # noqa: E402
 
@@ -79,7 +72,6 @@ def _requested_tab(path: str) -> str:
 
 
 def _normalize_persisted_types(payload: dict[str, Any]) -> None:
-    """Make Postgres-native scalar types safe for the existing HTML renderer."""
     changes = payload.get("changes_since_previous_snapshot") or {}
     for key in ("previous_captured_at", "latest_captured_at"):
         value = changes.get(key)
@@ -87,82 +79,79 @@ def _normalize_persisted_types(payload: dict[str, Any]) -> None:
             changes[key] = value.isoformat()
 
 
-class handler(BaseHTTPRequestHandler):
-    """Single Vercel Function serving all website tabs through rewrites."""
+def _analytics_query(path: str) -> tuple[str | None, dict[str, list[str]]]:
+    parsed = urlparse(path)
+    query = parse_qs(parsed.query)
+    return (query.get("analytics") or [None])[0], query
 
-    server_version = "fplengine-vercel/0.1"
+
+def _send_plain(handler: BaseHTTPRequestHandler, status: int, text: str) -> None:
+    body = text.encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "text/plain; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("X-Robots-Tag", "noindex")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+class handler(BaseHTTPRequestHandler):
+    """Single Vercel Function serving FPL pages and portfolio analytics."""
+
+    server_version = "fplengine-vercel/0.2"
+
+    def do_OPTIONS(self) -> None:
+        analytics_mode, _query = _analytics_query(self.path)
+        if analytics_mode in {"collect", "report"}:
+            analytics_options(self)
+            return
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self.send_header("Allow", "GET, POST, OPTIONS")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_POST(self) -> None:
+        analytics_mode, _query = _analytics_query(self.path)
+        if analytics_mode != "collect":
+            _send_plain(self, HTTPStatus.NOT_FOUND, "Not found.")
+            return
+        if not _DATABASE_URL:
+            _send_plain(self, HTTPStatus.SERVICE_UNAVAILABLE, "Analytics database unavailable.")
+            return
+        analytics_collect(self, _DATABASE_URL)
 
     def do_GET(self) -> None:
-        parsed = urlparse(self.path)
-        if parsed.path == "/api/index" and parse_qs(parsed.query).get("probe") == ["analytics_privileges"]:
+        analytics_mode, query = _analytics_query(self.path)
+        if analytics_mode == "report":
             if not _DATABASE_URL:
-                body = b'{"configured":false}'
-                self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                _send_plain(self, HTTPStatus.SERVICE_UNAVAILABLE, "Analytics database unavailable.")
                 return
-            try:
-                import json
-                import psycopg
-                with psycopg.connect(_DATABASE_URL) as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("""
-                            select current_database(), current_user,
-                                   has_database_privilege(current_user, current_database(), 'CREATE'),
-                                   has_schema_privilege(current_user, 'public', 'CREATE'),
-                                   has_schema_privilege(current_user, 'engine', 'CREATE'),
-                                   r.rolcreatedb, r.rolsuper
-                            from pg_roles r where r.rolname = current_user
-                        """)
-                        row = cur.fetchone()
-                payload = {
-                    "configured": True,
-                    "database": row[0],
-                    "user": row[1],
-                    "databaseCreate": bool(row[2]),
-                    "publicCreate": bool(row[3]),
-                    "engineCreate": bool(row[4]),
-                    "roleCreateDb": bool(row[5]),
-                    "superuser": bool(row[6]),
-                }
-                body = json.dumps(payload).encode("utf-8")
-            except Exception as exc:
-                body = ("{\"error\":\"" + type(exc).__name__ + "\"}").encode("utf-8")
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            analytics_report(self, _DATABASE_URL, query)
             return
+        if analytics_mode == "collect":
+            _send_plain(self, HTTPStatus.METHOD_NOT_ALLOWED, "Use POST.")
+            return
+
         if _CACHE is None:
-            body = (
-                "FPL Engine is deployed but no Neon database URL is configured."
-            ).encode("utf-8")
-            self.send_response(HTTPStatus.SERVICE_UNAVAILABLE)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            _send_plain(
+                self,
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "FPL Engine is deployed but no Neon database URL is configured.",
+            )
             return
 
         try:
             payload = _CACHE.get()
             _normalize_persisted_types(payload)
             body = page(_requested_tab(self.path), payload).encode("utf-8")
-        except Exception as exc:  # keep deployment failures observable, not silent
+        except Exception as exc:
             print(f"FPL Engine request failed: {type(exc).__name__}: {exc}")
-            body = b"FPL Engine request failed. Check deployment runtime logs."
-            self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            _send_plain(
+                self,
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "FPL Engine request failed. Check deployment runtime logs.",
+            )
             return
 
         self.send_response(HTTPStatus.OK)
